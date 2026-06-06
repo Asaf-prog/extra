@@ -115,9 +115,11 @@ definitions:
 ```
 
 ### `agents`
-Declares agents. An agent entry references a provider and prompt(s), lists the
-tools it may use, and **declares what it needs**: required context values and
-required permissions. The runtime resolves and enforces these.
+Declares **reusable agent definitions**. An agent entry references a provider and
+prompt(s), lists the tools it may use, and **declares what it needs**: required
+context values and required permissions. The runtime resolves and enforces these.
+A definition is declared **once** here and may be referenced **many times** in the
+`hierarchy` (each reference becomes a distinct compiled instance — see below).
 
 ```yaml
 definitions:
@@ -146,7 +148,8 @@ sidecar and what the permission layer enforces. → See
 ## `hierarchy`
 
 The hierarchy is a tree rooted at the `runtime.entrypoint` agent. Each node
-references an agent by id and may contain `children` and routing metadata.
+**references an agent definition by id** and may contain `children`, an `as`
+instance name, and routing metadata.
 
 ```yaml
 hierarchy:
@@ -159,11 +162,52 @@ hierarchy:
         - agent: invoice_agent
 ```
 
-Rules the validator will enforce (task 0002):
+### Reusable agents and the `as` keyword
+
+A node under `hierarchy` is a **reference** to an agent *definition*, not the
+definition itself. The same definition may be referenced **multiple times** under
+different parents. Each occurrence becomes a **distinct compiled instance**.
+
+To keep instances unambiguous, a node may declare `as`, an **instance name**:
+
+```yaml
+hierarchy:
+  agent: root_orchestrator
+  children:
+    - agent: invoice_orchestrator
+      children:
+        - agent: security_review_agent     # definition id
+          as: invoice_security_review      # instance name (this occurrence)
+
+    - agent: payment_orchestrator
+      children:
+        - agent: security_review_agent     # same definition, reused
+          as: payment_security_review      # distinct instance
+```
+
+Here `security_review_agent` is defined once but appears twice; the two
+occurrences compile into two separate instances (`invoice_security_review` and
+`payment_security_review`) that share one definition. Because of this, the
+hierarchy is a tree/DAG of **references to reusable definitions**, not a tree of
+unique agents.
+→ See [Agent definitions vs. agent instances](ARCHITECTURE.md#agent-definitions-vs-agent-instances)
+and [ADR 0006](adr/0006-reusable-agent-definitions-and-hierarchy-instances.md).
+
+### Rules the validator will enforce (task 0002)
 
 - Exactly one root, and it must match `runtime.entrypoint`.
-- Every `agent:` id must exist in `definitions.agents`.
-- No cycles.
+- Every `hierarchy.agent` id must exist in `definitions.agents`.
+- If a definition appears **more than once** in the hierarchy, **each occurrence
+  must declare a unique `as`** value.
+- `as` (instance) values must be unique within the compiled graph (or at minimum
+  unique within a parent scope, if scoped instance ids are adopted).
+- If `as` is omitted, the instance id may default to the agent id **only when
+  that agent appears exactly once**.
+- The compiler must **detect ambiguous repeated references** (the same definition
+  used multiple times without distinct `as`) and fail with a clear error.
+- **No cycles** in the MVP (a definition must not, directly or transitively,
+  contain itself). Cyclic/recursive graphs are out of scope unless explicitly
+  added later.
 - Routing metadata is **declarative** — it describes *when* to route, it is not
   executable code.
 

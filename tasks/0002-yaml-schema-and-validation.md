@@ -39,6 +39,9 @@ consume the validated spec.
   - required top-level keys present;
   - every `hierarchy` agent id exists in `definitions.agents`;
   - exactly one root, matching `runtime.entrypoint`;
+  - repeated references to the same agent definition each declare a unique `as`
+    instance name; ambiguous repeated references are rejected (see
+    [ADR 0006](../docs/adr/0006-reusable-agent-definitions-and-hierarchy-instances.md));
   - no cycles in the hierarchy;
   - referenced `provider`/`tools`/`mcp_server` ids exist in `definitions`;
   - routing metadata is declarative (no executable expressions);

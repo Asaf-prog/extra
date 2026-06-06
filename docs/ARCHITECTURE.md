@@ -65,15 +65,21 @@ happen before compilation. Output: a validated spec or a structured error set.
 ### 3. Compiler layer
 Transforms the validated spec into typed, immutable internal models. This is
 where declarative YAML becomes a real object graph. The compiler resolves
-references, expands the hierarchy, and links prompts/tools/providers to agents.
-Output: a `CompiledAgentGraph`. The runtime never sees raw YAML.
-→ See [ADR 0002](adr/0002-yaml-is-compiled-not-executed-directly.md).
+references, **expands each `hierarchy` reference into a distinct
+`CompiledAgentInstance`** that points to a shared `AgentDefinition`, and links
+prompts/tools/providers to definitions. Output: a `CompiledAgentGraph`. The
+runtime never sees raw YAML.
+→ See [ADR 0002](adr/0002-yaml-is-compiled-not-executed-directly.md) and
+[ADR 0006](adr/0006-reusable-agent-definitions-and-hierarchy-instances.md).
 
 ### 4. Agent graph layer
-The `CompiledAgentGraph` is an immutable, validated object graph: agents,
-their parent/child routing relationships, attached prompts, tool bindings,
-provider bindings, and declared context/permission requirements. Built once;
-shared read-only by all requests.
+The `CompiledAgentGraph` is an immutable, validated object graph of
+**`CompiledAgentInstance` nodes** — each a specific occurrence of a reusable
+`AgentDefinition` — with their parent/child routing relationships, attached
+prompts, tool bindings, provider bindings, and declared context/permission
+requirements. The same definition may back several instances. Built once; shared
+read-only by all requests. → See
+[Agent definitions vs. agent instances](#agent-definitions-vs-agent-instances).
 
 ### 5. Runtime layer
 The `RuntimeEngine` is constructed **once at application startup** from the
@@ -241,6 +247,116 @@ hierarchy:
 
 Definitions declare *what exists*; hierarchy declares *how it is arranged*. The
 compiler links the two into the `CompiledAgentGraph`.
+
+---
+
+## Agent definitions vs. agent instances
+
+The YAML carries two distinct concepts, and the compiler keeps them separate:
+
+- **Agent Definition** — a reusable declaration under `definitions.agents`. It
+  describes *what an agent is* (type, prompts, tools, provider, declared
+  context/permission requirements). Declared **once**.
+- **Agent Instance / graph node** — a specific **occurrence** of a definition
+  inside the `hierarchy`. It describes *where the agent sits* in the tree (its
+  parent and path).
+
+**The same definition may appear multiple times** under different parents. Each
+occurrence is a separate compiled instance that points back to the one shared
+definition. So the hierarchy is a tree/DAG of **references to reusable
+definitions**, not a tree of unique agents.
+
+### Why `as` exists
+
+When a definition is referenced more than once, the instances need stable,
+unambiguous identities for routing, tracing, and path-specific context. The `as`
+keyword names an occurrence:
+
+```yaml
+hierarchy:
+  agent: root_orchestrator
+  children:
+    - agent: invoice_orchestrator
+      children:
+        - agent: security_review_agent
+          as: invoice_security_review
+    - agent: payment_orchestrator
+      children:
+        - agent: security_review_agent
+          as: payment_security_review
+```
+
+`security_review_agent` is defined once but appears twice;
+`invoice_security_review` and `payment_security_review` are **distinct graph node
+instances** that share the same definition.
+
+### Internal model (compiler)
+
+The compiler distinguishes the reusable definition from each compiled instance:
+
+```text
+AgentDefinition
+  id: security_review_agent
+  type: specialist
+  prompts: ...
+  tools: ...
+
+CompiledAgentInstance
+  instance_id: invoice_security_review
+  agent_id: security_review_agent
+  parent_instance_id: invoice_orchestrator
+  path: root_orchestrator.invoice_orchestrator.invoice_security_review
+
+CompiledAgentInstance
+  instance_id: payment_security_review
+  agent_id: security_review_agent
+  parent_instance_id: payment_orchestrator
+  path: root_orchestrator.payment_orchestrator.payment_security_review
+```
+
+Each instance carries its own `instance_id`, the `agent_id` of its definition,
+its `parent_instance_id`, and a fully-qualified `path`. The definition holds the
+shared, reusable configuration.
+
+### Runtime rule
+
+The **runtime executes `CompiledAgentInstance` nodes, not definitions.** An
+instance points to its `AgentDefinition` for configuration. Executing instances
+(rather than definitions) enables:
+
+- reusable agents,
+- clear tracing (each occurrence is distinct),
+- path-specific routing,
+- path-specific context,
+- optional future instance-level overrides.
+
+→ See [RUNTIME_LIFECYCLE.md](RUNTIME_LIFECYCLE.md).
+
+### Tracing reused agents
+
+Trace events use the **`instance_id`** as the primary identity (so reused agents
+are distinguishable in a trace) and **also include the original `agent_id`** (so
+the trace shows which definition was executed). Including the `path` makes the
+position in the hierarchy explicit. → See the observability layer above.
+
+### Validation rules (summary)
+
+The validator/compiler enforce (see [YAML_SPEC.md](YAML_SPEC.md) for detail):
+
+1. Every `hierarchy.agent` references an existing `definitions.agents` entry.
+2. A definition used more than once must give each occurrence a unique `as`.
+3. `as` (instance) ids are unique within the compiled graph (or at least within a
+   parent scope).
+4. If `as` is omitted, the instance id defaults to the agent id **only** when the
+   agent appears exactly once.
+5. Ambiguous repeated references (reused definition without distinct `as`) are
+   rejected with a clear error.
+6. No cycles in the MVP.
+7. Traces use `instance_id` and also include `agent_id`.
+8. Runtime executes instances, not only definitions.
+
+→ Decision recorded in
+[ADR 0006](adr/0006-reusable-agent-definitions-and-hierarchy-instances.md).
 
 ---
 

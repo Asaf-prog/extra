@@ -82,7 +82,12 @@ to ask for it. If a rule blocks you, stop and raise it.
 See `docs/adr/` for the rationale behind the most important rules. In
 particular, **read
 [ADR 0005](docs/adr/0005-prompt-rendering-and-context-resolution.md) before
-changing prompt rendering, context resolver, sidecar, or tool-policy behavior.**
+changing prompt rendering, context resolver, sidecar, or tool-policy behavior**,
+and **read
+[ADR 0006](docs/adr/0006-reusable-agent-definitions-and-hierarchy-instances.md)
+before changing how agent definitions, the hierarchy, the compiled graph, or
+agent execution work** (the runtime executes reusable *instances*, not
+definitions).
 
 ---
 

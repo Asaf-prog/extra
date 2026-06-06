@@ -25,6 +25,7 @@ codebase. Read them before changing anything they cover:
 - [0003 — Client-specific logic lives in the sidecar](adr/0003-client-specific-logic-lives-in-sidecar.md)
 - [0004 — Prompts are templates rendered per request](adr/0004-prompts-are-templates-rendered-per-request.md)
 - [0005 — Prompt templates are rendered per request using resolved context](adr/0005-prompt-rendering-and-context-resolution.md)
+- [0006 — Reusable agent definitions and hierarchy instances](adr/0006-reusable-agent-definitions-and-hierarchy-instances.md)
 
 ## Relationship to other directories
 

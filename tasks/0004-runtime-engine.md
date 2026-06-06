@@ -44,6 +44,9 @@ plug into.
   resolved context placeholder, trace).
 - The engine is safe to use concurrently (no shared mutable request state).
 - Routing selects an agent path deterministically from declarative metadata.
+- **Execution operates on `CompiledAgentInstance` nodes, not definitions** (see
+  [ADR 0006](../docs/adr/0006-reusable-agent-definitions-and-hierarchy-instances.md));
+  trace events use `instance_id` and also include `agent_id`.
 - Execution is recursive over the hierarchy and produces a response + trace
   object, even if downstream subsystems are stubbed at the seam.
 - Seams are abstract (protocols/interfaces); no concrete prompt/sidecar/tool
