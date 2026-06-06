@@ -1,0 +1,97 @@
+# Runtime Lifecycle
+
+This document defines the lifecycle of the runtime and is binding. The single
+most important rule in this repository lives here:
+
+> **`RuntimeEngine` is created once at application startup.
+> `ExecutionContext` is created per request. Never create a runtime per
+> request.**
+
+→ See [ADR 0001](adr/0001-runtime-engine-created-once.md).
+
+---
+
+## Two lifecycles
+
+### Startup (once per process)
+
+```
+load agent.yml
+  → validate
+  → compile → CompiledAgentGraph (immutable)
+  → construct RuntimeEngine(compiled_graph, providers, tool registry, sidecar client, ...)
+```
+
+The `RuntimeEngine` and the `CompiledAgentGraph` are built **once** and shared,
+read-only, across all requests. Expensive setup (parsing the graph, preparing
+provider clients, loading and parsing prompt templates, opening MCP connections)
+happens here — not on the request path.
+
+### Per request (many)
+
+```
+request arrives
+  → create ExecutionContext(request_id, request data, trace)
+  → [optional] pre-routing sidecar call → populate context
+  → route through hierarchy
+  → [optional] pre-agent sidecar call → populate context
+  → resolve context (assemble values from declared sources)
+  → render prompts (per request)
+  → execute agent(s)
+  → enforce tool permissions on each tool call
+  → finalize response + trace
+```
+
+Everything that varies between requests lives on the `ExecutionContext`.
+
+---
+
+## RuntimeEngine
+
+- **Long-lived**, created at startup, one per process.
+- **Holds shared, read-only collaborators**: the compiled graph, provider
+  clients, the tool registry, the sidecar client, the prompt template cache.
+- **Holds NO request state.** No "current user", no "current request", no
+  per-request mutable fields.
+- **Thread/async-safe by construction**: because it carries no request state,
+  many requests can use it concurrently.
+
+What does **not** belong on `RuntimeEngine`:
+
+- The current request, identity, tenant, or permissions.
+- Rendered prompts for a specific request.
+- Any mutable counter/buffer scoped to a single request.
+
+## ExecutionContext
+
+- **Per request**, created fresh, never reused.
+- **Carries everything request-scoped**: `request_id`, request data/headers,
+  resolved identity, tenant/customer, permissions, resolved context values,
+  the current routing path, and the trace accumulator.
+- **Passed explicitly** down through routing, context resolution, prompt
+  rendering, and tool execution.
+- **Discarded** when the request completes.
+
+---
+
+## Why this matters
+
+- **Correctness:** sharing request state on a long-lived engine causes data to
+  leak between concurrent requests (e.g. one tenant seeing another's context).
+- **Performance:** recompiling the graph or reconstructing the engine per
+  request wastes the expensive work that should happen once.
+- **Concurrency:** a stateless engine + per-request context is safe to run
+  concurrently without locks around request data.
+
+---
+
+## Validation checklist (for any runtime change)
+
+- [ ] `RuntimeEngine` construction happens only at startup paths (API/CLI boot),
+      never inside a request handler.
+- [ ] No request-scoped field is added to `RuntimeEngine` or
+      `CompiledAgentGraph`.
+- [ ] All request-scoped data lives on `ExecutionContext`.
+- [ ] The compiled graph is treated as immutable at runtime.
+- [ ] Tests cover concurrent requests not leaking state.
+- [ ] `make check` passes.
