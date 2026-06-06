@@ -12,7 +12,7 @@ checklists, common mistakes, and the report to produce afterwards.
 2. Read the **practice skill(s)** for the *kind* of work you're doing (review,
    testing, engineering, refactoring, docs, git, architecture review).
 3. Read the **area skill** for the *part of the system* you're touching (YAML,
-   runtime, prompts, sidecar, tools).
+   runtime, prompts, plugin context/access, tools).
 4. **If a task touches multiple areas, read all relevant skills before editing.**
 5. Follow the process, finish the checklist, and produce the skill's expected
    report.
@@ -42,8 +42,8 @@ What the rules are for a specific part of the system.
 | [yaml-schema-skill](yaml-schema-skill.md)                      | YAML schema, loading, validation.             |
 | [runtime-engine-skill](runtime-engine-skill.md)                | RuntimeEngine, ExecutionContext, lifecycle.   |
 | [prompt-rendering-skill](prompt-rendering-skill.md)            | Prompt templates and rendering.               |
-| [sidecar-auth-context-skill](sidecar-auth-context-skill.md)    | Sidecar contract, context/auth resolution.    |
-| [mcp-tools-skill](mcp-tools-skill.md)                          | Tools, MCP servers, permission enforcement.   |
+| [sidecar-auth-context-skill](sidecar-auth-context-skill.md)    | Plugin context and protected-node access.     |
+| [mcp-tools-skill](mcp-tools-skill.md)                          | Tool plugins and MCP servers.                 |
 
 > Note: practice skills follow the standard 8-section format
 > (Purpose → … → Expected Final Report). Area skills predate that format and use
