@@ -10,7 +10,7 @@ and create an `ExecutionContext` **per request**, returning a response + trace.
 The API is a surface over the runtime. The most important rule: build the engine
 once at application startup (lifespan/startup hook), never per request.
 
-**Read first:** `AGENTS.md`, `skills/runtime-engine-skill.md`,
+**Read first:** `AGENTS.md`, `.ai/skills/runtime-engine.md`,
 `docs/RUNTIME_LIFECYCLE.md`, `docs/adr/0001-runtime-engine-created-once.md`,
 `docs/ARCHITECTURE.md` (API layer).
 

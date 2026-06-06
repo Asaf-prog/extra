@@ -12,7 +12,7 @@ Tools enforce permissions and injected parameters; prompt text is not a security
 boundary. Connections are created once and shared. This task fills the tool seam
 from 0004 and uses context/tool policy from 0006.
 
-**Read first:** `AGENTS.md`, `skills/mcp-tools-skill.md`, `docs/MCP_AND_TOOLS.md`,
+**Read first:** `AGENTS.md`, `.ai/skills/mcp-tools.md`, `docs/MCP_AND_TOOLS.md`,
 `docs/SIDECAR_CONTEXT_AUTH.md` (permissions + tool policy).
 
 ## Scope

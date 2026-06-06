@@ -7,14 +7,14 @@ on, matching the planned layout in `AGENTS.md`. No product behavior yet.
 
 ## Context
 
-The repository currently has docs, skills, tasks, a `Makefile`, and
-`pyproject.toml`, but no `src/` package. Later tasks (0002+) assume a package at
+The repository currently has docs, the `.ai/` instruction system, tasks, a
+`Makefile`, and `pyproject.toml`, but no `src/` package. Later tasks (0002+) assume a package at
 `src/agentplatform/` with per-layer subpackages. This task creates that empty,
 importable skeleton so tooling (`ruff`, `mypy`, `pytest`) has something to act
 on.
 
-**Read first:** `AGENTS.md`, `skills/project-architecture-skill.md`,
-`skills/testing-skill.md`.
+**Read first:** `AGENTS.md`, `.ai/skills/project-architecture.md`,
+`.ai/skills/testing.md`.
 
 ## Scope
 

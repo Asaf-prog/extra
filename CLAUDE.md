@@ -4,6 +4,13 @@ Project entrypoint for **Claude Code**. Read this first, then follow the links
 below. This file is a concise operating guide; `AGENTS.md` is the full manual and
 takes precedence if anything conflicts.
 
+This repository uses a **generic, tool-agnostic AI instruction system**. The
+canonical instruction source is [`.ai/`](.ai/) — shared by Claude Code, Codex,
+Cursor, and any future tool. Claude Code should start from `AGENTS.md`,
+`CLAUDE.md`, and [`.ai/README.md`](.ai/README.md), and read the relevant
+`.ai/skills/*` file **before editing**. Do **not** recreate `.claude/skills/` or
+`.claude/agents/`, and do not duplicate `.ai/` content anywhere under `.claude/`.
+
 ---
 
 ## 1. Project mission
@@ -52,48 +59,49 @@ Before implementing feature work, read:
 - `docs/RUNTIME_LIFECYCLE.md`
 - `docs/SIDECAR_CONTEXT_AUTH.md`
 - `docs/PROMPT_RENDERING.md`
-- `skills/README.md`
+- `.ai/README.md`
 
 For any task, also open the relevant file in `tasks/` and work within its scope.
 
 ## 5. How to use skills
 
-There are two layers:
+All skills, roles, and workflows live under **`.ai/`** — the single,
+tool-agnostic source of truth. There is **no** Claude-specific copy; `.claude/`
+holds only `settings.json` and a README that points here.
 
-- **Root `skills/`** — the tool-agnostic, in-depth playbook library.
-- **`.claude/skills/<name>/SKILL.md`** — concise, Claude-native invocation layer
-  that points back to the matching root skill.
+Always read `.ai/skills/project-architecture.md` first. Then pick the skill(s)
+for your task. **If a task touches multiple areas, read all relevant skills
+before editing.**
 
-Always read `skills/project-architecture-skill.md` first. Then pick the Claude
-skill(s) for your task. **If a task touches multiple areas, read all relevant
-skills before editing.**
+For specific work, use the relevant skill:
 
-For specific work, use the relevant Claude skill:
+- Code review: `.ai/skills/code-review.md`
+- Testing: `.ai/skills/testing.md`
+- Python implementation: `.ai/skills/senior-python-engineering.md`
+- Architecture: `.ai/skills/architecture-review.md`
+- Refactoring: `.ai/skills/refactoring.md`
+- Documentation: `.ai/skills/documentation.md`
+- YAML schema: `.ai/skills/yaml-schema.md`
+- Runtime engine: `.ai/skills/runtime-engine.md`
+- Prompt rendering: `.ai/skills/prompt-rendering.md`
+- Sidecar auth/context: `.ai/skills/sidecar-auth-context.md`
+- MCP/tools: `.ai/skills/mcp-tools.md`
 
-- Code review: `.claude/skills/code-review/SKILL.md`
-- Testing: `.claude/skills/testing/SKILL.md`
-- Python implementation: `.claude/skills/senior-python-engineering/SKILL.md`
-- Architecture: `.claude/skills/architecture-review/SKILL.md`
-- Refactoring: `.claude/skills/refactoring/SKILL.md`
-- Documentation: `.claude/skills/documentation/SKILL.md`
-- YAML schema: `.claude/skills/yaml-schema/SKILL.md`
-- Runtime engine: `.claude/skills/runtime-engine/SKILL.md`
-- Prompt rendering: `.claude/skills/prompt-rendering/SKILL.md`
-- Sidecar auth/context: `.claude/skills/sidecar-auth-context/SKILL.md`
-- MCP/tools: `.claude/skills/mcp-tools/SKILL.md`
+Workflows that combine skills end-to-end live in `.ai/workflows/`.
 
-## 6. How to choose subagents
+## 6. How to choose roles
 
-Claude subagents live in `.claude/agents/`:
+Reusable agent personas live in **`.ai/roles/`**:
 
-- **architect** — architecture planning/review; read-only, does not implement
-  unless explicitly asked.
-- **code-reviewer** — senior structured code review.
-- **test-engineer** — plans and writes pytest tests; never calls real external
-  services.
-- **documentation-writer** — updates README/docs/ADRs/skills honestly.
+- **architect** (`.ai/roles/architect.md`) — architecture planning/review;
+  read-only, does not implement unless explicitly asked.
+- **code-reviewer** (`.ai/roles/code-reviewer.md`) — senior structured review.
+- **test-engineer** (`.ai/roles/test-engineer.md`) — plans and writes pytest
+  tests; never calls real external services.
+- **documentation-writer** (`.ai/roles/documentation-writer.md`) — updates
+  README/docs/ADRs/skills honestly.
 
-Use a subagent when the work matches its purpose; otherwise work directly using
+Adopt a role when the work matches its purpose; otherwise work directly using
 the relevant skill.
 
 ## 7. Required validation commands
@@ -126,4 +134,6 @@ After a task, report:
 - Do not implement multiple tasks at once or rewrite architecture casually.
 - Do not skip tests; do not hardcode secrets.
 - Do not change architecture decisions without an ADR (see
-  `skills/architecture-review-skill.md`).
+  `.ai/skills/architecture-review.md`).
+- Do not recreate `.claude/skills/` or `.claude/agents/`; do not duplicate
+  `.ai/` content. `.claude/` holds only `settings.json` and a thin `README.md`.

@@ -2,7 +2,7 @@
 #
 # Run `make install` once to set up the environment (editable install + dev
 # tools), then use `make check` as the quality gate. AGENTS.md, CLAUDE.md, and
-# the skills/tasks refer to these targets.
+# the .ai/ skills and tasks refer to these targets.
 
 PYTHON ?= python3
 SRC := src

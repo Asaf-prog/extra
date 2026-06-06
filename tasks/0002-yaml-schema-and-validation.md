@@ -12,7 +12,7 @@ Per the architecture, YAML is validated before it is compiled or run. This task
 implements only the **spec** and **validation** layers. The compiler (0003) will
 consume the validated spec.
 
-**Read first:** `AGENTS.md`, `skills/yaml-schema-skill.md`, `docs/YAML_SPEC.md`,
+**Read first:** `AGENTS.md`, `.ai/skills/yaml-schema.md`, `docs/YAML_SPEC.md`,
 `docs/adr/0002-yaml-is-compiled-not-executed-directly.md`.
 
 ## Scope

@@ -122,7 +122,7 @@ blurring the build, runtime, and client-extension phases.**
 │   ├── MCP_AND_TOOLS.md
 │   ├── DEVELOPMENT_WORKFLOW.md
 │   └── adr/                   ← architecture decision records
-├── skills/                    ← operational guides for agents (read before work)
+├── .ai/                       ← canonical agent instructions (skills/roles/workflows)
 ├── tasks/                     ← small, ordered implementation tasks
 └── src/agentplatform/         ← (PLANNED) implementation, created by task 0001
 ```
@@ -146,40 +146,55 @@ src/agentplatform/
 
 ---
 
-## 5. Skills System
+## 5. AI Instruction System
 
-`skills/` contains operational playbooks. **Before doing any work, choose and
-read the relevant skill(s).** Start with `skills/README.md` and always read
-`skills/project-architecture-skill.md` first; then pick by the *kind* of task
-and the *area* of the system.
+The **canonical instruction system lives under [`.ai/`](.ai/)** — it is the
+single source of truth for how AI agents (Claude Code, Codex, Cursor, or any
+future tool) work in this repo. **Before doing any work, read this file
+(`AGENTS.md`) and [`.ai/README.md`](.ai/README.md).**
+
+- [`.ai/skills/`](.ai/skills/) — reusable operational playbooks (how to do a
+  kind of work well).
+- [`.ai/roles/`](.ai/roles/) — reusable role definitions (architect,
+  code-reviewer, test-engineer, documentation-writer).
+- [`.ai/workflows/`](.ai/workflows/) — task workflows (feature-task, code-review,
+  testing, documentation-update).
+
+**Tool-specific folders (`.claude/`, `.codex/`, `.agents/`, `.cursor/`) must not
+duplicate instruction content.** They hold only tool configuration and thin
+adapter READMEs that point back to `.ai/`. If a future tool needs a specific
+format, generate **thin adapters only** — never copy skills, roles, or workflows.
+
+Always read [`.ai/skills/project-architecture.md`](.ai/skills/project-architecture.md)
+first; then pick by the *kind* of task and the *area* of the system.
 
 > **Rule: if a task touches multiple areas, read all relevant skills before
 > editing.** (e.g. implementing the runtime in Python while adding tests →
-> read the senior-python, runtime-engine, and testing skills.)
+> read the senior-python-engineering, runtime-engine, and testing skills.)
 
 ### Task → skill mapping (practice skills)
 
-| Task type                         | Read this skill                              |
-| --------------------------------- | -------------------------------------------- |
-| Code review task                  | `skills/code-review-skill.md`                |
-| Test task                         | `skills/testing-skill.md`                    |
-| Python implementation task        | `skills/senior-python-engineering-skill.md`  |
-| New skill creation                | `skills/skill-authoring-skill.md`            |
-| Architecture change               | `skills/architecture-review-skill.md`        |
-| Refactor                          | `skills/refactoring-skill.md`                |
-| Documentation update              | `skills/documentation-skill.md`              |
-| Git / change management           | `skills/git-workflow-skill.md`               |
-| Anything (always, first)          | `skills/project-architecture-skill.md`       |
+| Task type                         | Read this skill                                 |
+| --------------------------------- | ----------------------------------------------- |
+| Python implementation task        | `.ai/skills/senior-python-engineering.md`       |
+| Test task                         | `.ai/skills/testing.md`                          |
+| Code review task                  | `.ai/skills/code-review.md`                      |
+| Architecture change               | `.ai/skills/architecture-review.md`              |
+| Refactor                          | `.ai/skills/refactoring.md`                      |
+| Documentation update              | `.ai/skills/documentation.md`                    |
+| Git / change management           | `.ai/skills/git-workflow.md`                     |
+| New skill creation                | `.ai/skills/skill-authoring.md`                  |
+| Anything (always, first)          | `.ai/skills/project-architecture.md`             |
 
 ### Area → skill mapping (system-specific skills)
 
-| If you are working on…                     | Read this skill                          |
-| ------------------------------------------ | ---------------------------------------- |
-| YAML schema, loading, validation           | `skills/yaml-schema-skill.md`            |
-| RuntimeEngine, ExecutionContext, lifecycle | `skills/runtime-engine-skill.md`         |
-| Prompt templates / rendering               | `skills/prompt-rendering-skill.md`       |
-| Sidecar contract, context/auth resolution  | `skills/sidecar-auth-context-skill.md`   |
-| Tools, MCP servers, permissions            | `skills/mcp-tools-skill.md`              |
+| If you are working on…                     | Read this skill                       |
+| ------------------------------------------ | ------------------------------------- |
+| YAML schema, loading, validation           | `.ai/skills/yaml-schema.md`           |
+| RuntimeEngine, ExecutionContext, lifecycle | `.ai/skills/runtime-engine.md`        |
+| Prompt templates / rendering               | `.ai/skills/prompt-rendering.md`      |
+| Sidecar contract, context/auth resolution  | `.ai/skills/sidecar-auth-context.md`  |
+| Tools, MCP servers, permissions            | `.ai/skills/mcp-tools.md`             |
 
 Each skill ends with an **Expected Final Report** (or validation checklist) —
 apply it before declaring work done.
@@ -276,14 +291,15 @@ This repository is prepared for **Claude Code**. See
 `docs/CLAUDE_CODE_WORKFLOW.md` for the full workflow.
 
 - **`CLAUDE.md` is the project entrypoint** Claude Code reads first. It mirrors
-  this manual's rules; if the two ever disagree, **`AGENTS.md` wins**.
-- **Claude-native skills live under `.claude/skills/<name>/SKILL.md`** — concise,
-  operational, with frontmatter. Each references the deeper, tool-agnostic
-  playbook in root **`skills/`** (the source of truth for *how*). Don't duplicate
-  content between them.
-- **Claude subagents live under `.claude/agents/`**: `architect` (planning/
-  review, read-only), `code-reviewer` (structured review), `test-engineer`
-  (pytest, never calls real services), `documentation-writer` (honest docs).
+  this manual's rules and points to `.ai/`; if the two ever disagree,
+  **`AGENTS.md` wins**.
+- **Skills, roles, and workflows are NOT duplicated under `.claude/`.** They live
+  only under [`.ai/`](.ai/) — the single source of truth (see §5). `.claude/`
+  contains only `settings.json` (tool permissions) and a thin `README.md` that
+  points to `.ai/`.
+- **Role/persona definitions** (`architect`, `code-reviewer`, `test-engineer`,
+  `documentation-writer`) live under [`.ai/roles/`](.ai/roles/), not in
+  `.claude/agents/`.
 - **Shared, conservative settings live in `.claude/settings.json`.** Local/private
   config (`CLAUDE.local.md`, `.claude/settings.local.json`) is git-ignored.
 
@@ -292,9 +308,9 @@ This repository is prepared for **Claude Code**. See
 For each task, **select the relevant skill(s) before editing**. If a task spans
 multiple areas, read all relevant skills first. In particular:
 
-- Task touches **architecture** → use `.claude/skills/architecture-review/SKILL.md`.
-- Task touches **tests** → use `.claude/skills/testing/SKILL.md`.
-- Task touches **Python code** → use `.claude/skills/senior-python-engineering/SKILL.md`.
+- Task touches **architecture** → use `.ai/skills/architecture-review.md`.
+- Task touches **tests** → use `.ai/skills/testing.md`.
+- Task touches **Python code** → use `.ai/skills/senior-python-engineering.md`.
 
-The full task→skill and area→skill mappings are in §5 (Skills System) and in
-`CLAUDE.md`.
+The full task→skill and area→skill mappings are in §5 (AI Instruction System)
+and in `CLAUDE.md`.

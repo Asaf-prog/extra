@@ -6,7 +6,7 @@ aspiration.
 
 | Phase | Theme                         | Tasks      | Status        |
 | ----- | ----------------------------- | ---------- | ------------- |
-| 0     | Repository foundation         | docs/skills/tasks | ✅ done   |
+| 0     | Repository foundation         | docs/.ai/tasks | ✅ done      |
 | 1     | Package skeleton & tooling    | 0001       | ⏳ planned     |
 | 2     | YAML schema & validation      | 0002       | ⏳ planned     |
 | 3     | Compiled agent graph          | 0003       | ⏳ planned     |

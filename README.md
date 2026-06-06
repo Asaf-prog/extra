@@ -138,7 +138,8 @@ layer. See [docs/PROMPT_RENDERING.md](docs/PROMPT_RENDERING.md).
 This repository is **agent-first**. If you are an AI coding agent:
 
 1. Read [AGENTS.md](AGENTS.md) in full.
-2. Read the relevant guide in [`skills/`](skills/).
+2. Read [`.ai/README.md`](.ai/README.md) and the relevant guide in
+   [`.ai/skills/`](.ai/skills/).
 3. Pick the next task in [`tasks/`](tasks/) and work strictly within its scope.
 4. Run `make check` before finishing and report using the format in AGENTS.md.
 

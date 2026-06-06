@@ -12,7 +12,7 @@ Client-specific auth/business logic lives in the sidecar, not the runtime. The
 runtime only calls, maps, enforces, and traces. This task fills the sidecar seam
 from 0004 and feeds resolved context to prompts (0005) and tools (0007).
 
-**Read first:** `AGENTS.md`, `skills/sidecar-auth-context-skill.md`,
+**Read first:** `AGENTS.md`, `.ai/skills/sidecar-auth-context.md`,
 `docs/SIDECAR_CONTEXT_AUTH.md`,
 `docs/adr/0003-client-specific-logic-lives-in-sidecar.md`.
 

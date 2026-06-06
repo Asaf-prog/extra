@@ -14,7 +14,7 @@ the `CompiledAgentGraph`; a fresh context is created per request. This task sets
 the lifecycle and seams that prompts (0005), sidecar (0006), and tools (0007)
 plug into.
 
-**Read first:** `AGENTS.md`, `skills/runtime-engine-skill.md`,
+**Read first:** `AGENTS.md`, `.ai/skills/runtime-engine.md`,
 `docs/RUNTIME_LIFECYCLE.md`,
 `docs/adr/0001-runtime-engine-created-once.md`.
 

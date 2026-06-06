@@ -1,0 +1,57 @@
+---
+description: Project-wide AI instructions
+alwaysApply: true
+---
+
+This repository uses a generic, tool-agnostic AI instruction system.
+
+Canonical instructions live under:
+
+- AGENTS.md
+- .ai/README.md
+- .ai/skills/
+- .ai/roles/
+- .ai/workflows/
+
+Do not duplicate skills, roles, or workflows under .cursor/. This file is a thin
+adapter that points to `.ai/` — the single source of truth.
+
+Before editing code, read the relevant `.ai/` skill. Always read
+`.ai/skills/project-architecture.md` first; if a task spans multiple areas, read
+all relevant skills before editing.
+
+For Python implementation:
+- .ai/skills/senior-python-engineering.md
+
+For tests:
+- .ai/skills/testing.md
+
+For architecture changes:
+- .ai/skills/architecture-review.md
+
+For code review:
+- .ai/skills/code-review.md
+
+For refactoring:
+- .ai/skills/refactoring.md
+
+For documentation:
+- .ai/skills/documentation.md
+
+For prompt rendering:
+- .ai/skills/prompt-rendering.md
+
+For sidecar/auth/context:
+- .ai/skills/sidecar-auth-context.md
+
+For MCP/tools:
+- .ai/skills/mcp-tools.md
+
+For YAML schema:
+- .ai/skills/yaml-schema.md
+
+For the runtime engine:
+- .ai/skills/runtime-engine.md
+
+Reusable role personas live in `.ai/roles/`; end-to-end task recipes live in
+`.ai/workflows/`. Validate work with `make check` before finishing.

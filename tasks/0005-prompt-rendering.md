@@ -11,7 +11,7 @@ runtime's prompt seam.
 Prompts are templates; parsed templates are cached, rendered output never is.
 Values are resolved per request. This task fills the prompt seam created in 0004.
 
-**Read first:** `AGENTS.md`, `skills/prompt-rendering-skill.md`,
+**Read first:** `AGENTS.md`, `.ai/skills/prompt-rendering.md`,
 `docs/PROMPT_RENDERING.md`,
 `docs/adr/0004-prompts-are-templates-rendered-per-request.md`.
 

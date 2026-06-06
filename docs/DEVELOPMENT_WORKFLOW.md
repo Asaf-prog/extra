@@ -7,7 +7,8 @@ How to work in this repository, for humans and AI agents alike.
 ## Before you start
 
 1. Read [AGENTS.md](../AGENTS.md) (the operating manual).
-2. Read the relevant guide in [`skills/`](../skills/).
+2. Read the relevant guide in [`.ai/skills/`](../.ai/skills/) (start with
+   [`.ai/README.md`](../.ai/README.md)).
 3. Open the task in [`tasks/`](../tasks/) and read its **Goal, Scope, Files
    allowed to change, and Out of scope**.
 
@@ -53,7 +54,7 @@ pick the next task → read its skill(s) → make a small change → run `make c
 - Small, focused commits with clear messages.
 - One task per branch where practical.
 - Do not commit secrets, `.env` files, or large binaries.
-- → See [`skills/git-workflow-skill.md`](../skills/git-workflow-skill.md).
+- → See [`.ai/skills/git-workflow.md`](../.ai/skills/git-workflow.md).
 
 ## Staying in scope
 

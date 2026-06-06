@@ -8,81 +8,84 @@ effectively. This complements `AGENTS.md` (the tool-agnostic manual) and
 
 ## 1. How this repository is prepared for Claude Code
 
-The repo ships Claude-native configuration so Claude Code has a clear entrypoint,
-reusable skills, and focused subagents:
+All agent instructions — skills, roles, and workflows — live in one canonical,
+tool-agnostic place: **`.ai/`**. Claude Code reads `CLAUDE.md` as its entrypoint,
+which points to `.ai/`. `.claude/` holds only tool configuration and a thin
+adapter README; it contains **no duplicated instructions**.
 
 ```
-CLAUDE.md                      ← Claude entrypoint (mission, rules, skill/agent map)
+CLAUDE.md                      ← Claude entrypoint (mission, rules, skill/role map)
 .claude/
-├── settings.json              ← conservative, shared project settings
-├── skills/<name>/SKILL.md     ← Claude-native skill invocation layer
-└── agents/<name>.md           ← Claude subagent definitions
+├── settings.json              ← conservative, shared project settings (permissions)
+└── README.md                  ← thin adapter; points to .ai/
 docs/CLAUDE_CODE_WORKFLOW.md   ← this file
-skills/                        ← root, tool-agnostic playbook library (deeper)
+.ai/                           ← canonical, tool-agnostic instruction system
+├── README.md                  ← index
+├── skills/                    ← operational playbooks (how to work)
+├── roles/                     ← agent personas (architect, reviewer, …)
+└── workflows/                 ← end-to-end task workflows
 ```
 
 ## 2. What `CLAUDE.md` is for
 
 `CLAUDE.md` is the project entrypoint Claude Code reads first. It states the
 mission, the core pipeline, the non-negotiable architecture rules, what to read
-before feature work, how to use skills and subagents, the validation commands,
-and the required final-response format. If `CLAUDE.md` and `AGENTS.md` ever
-disagree, `AGENTS.md` wins.
+before feature work, how to use the `.ai/` skills and roles, the validation
+commands, and the required final-response format. If `CLAUDE.md` and `AGENTS.md`
+ever disagree, `AGENTS.md` wins.
 
-## 3. What `.claude/skills/` is for
+## 3. Single source of truth: `.ai/`
 
-`.claude/skills/<name>/SKILL.md` is the **Claude-native invocation layer**: short,
-operational skills with frontmatter (`name`, `description`) that Claude can
-select per task. Each one is concise and **references the deeper root skill**
-(e.g. "also read `skills/testing-skill.md`") instead of duplicating it.
+There is **one** instruction system, under `.ai/`:
 
-Available: `code-review`, `testing`, `senior-python-engineering`,
-`architecture-review`, `refactoring`, `documentation`, `yaml-schema`,
-`runtime-engine`, `prompt-rendering`, `sidecar-auth-context`, `mcp-tools`.
+- `.ai/skills/<name>.md` — operational playbooks (each with `name`/`description`
+  frontmatter so any tool can select them).
+- `.ai/roles/<name>.md` — focused personas (`architect`, `code-reviewer`,
+  `test-engineer`, `documentation-writer`).
+- `.ai/workflows/<name>.md` — recipes that combine roles + skills for a common
+  task (`feature-task`, `code-review`, `testing`, `documentation-update`).
 
-## 4. What `.claude/agents/` is for
+Claude Code, Codex, Cursor, and any future tool read the same files. **Do not
+copy these into `.claude/` (or any tool folder).** If a tool needs a specific
+format in the future, generate a *thin adapter* that references `.ai/` — never a
+duplicate.
 
-`.claude/agents/<name>.md` defines **subagents** — focused personas with their
-own instructions and (where useful) restricted tools:
+Available skills: `project-architecture`, `senior-python-engineering`,
+`code-review`, `architecture-review`, `refactoring`, `testing`, `documentation`,
+`git-workflow`, `skill-authoring`, `yaml-schema`, `runtime-engine`,
+`prompt-rendering`, `sidecar-auth-context`, `mcp-tools`.
+
+## 4. Roles (personas)
+
+Adopt a role from `.ai/roles/` when the work matches it:
 
 - **architect** — architecture planning/review (read-only; doesn't implement
   unless asked).
-- **code-reviewer** — senior structured review (read-only).
+- **code-reviewer** — senior structured review.
 - **test-engineer** — plans/writes pytest tests; never calls real services.
 - **documentation-writer** — updates docs/ADRs honestly.
 
-## 5. Root `skills/` vs. `.claude/skills/`
-
-| | Root `skills/` | `.claude/skills/` |
-| --- | --- | --- |
-| Audience | Any tool/agent | Claude Code |
-| Depth | In-depth playbooks | Concise, operational |
-| Role | Source of truth for *how* | Invocation layer that points to the root skill |
-| Format | Project playbook sections | Frontmatter + standard SKILL sections |
-
-Rule of thumb: **start from the `.claude/skill`, then read the referenced root
-skill** for full detail before doing the work. Don't duplicate content between
-them — improve the root skill and let the Claude skill point to it.
-
-## 6. Recommended workflow
+## 5. Recommended workflow
 
 1. **Read the task** in `tasks/` (Goal, Scope, Files allowed to change, Out of
    scope).
-2. **Read relevant docs** (`AGENTS.md`, `CLAUDE.md`, and the architecture/layer
-   docs the task touches).
-3. **Use the relevant skill(s)** — the matching `.claude/skills/*` and its root
-   skill. If the task touches multiple areas, read all relevant skills first.
-4. **Plan** the change in small, task-sized steps (consider the `architect`
-   subagent for design-heavy work).
+2. **Read context** (`AGENTS.md`, `CLAUDE.md`, `.ai/README.md`, and the
+   architecture/layer docs the task touches).
+3. **Pick a workflow** in `.ai/workflows/` and the skill(s) it names. Always read
+   `.ai/skills/project-architecture.md` first. If the task touches multiple
+   areas, read all relevant skills first.
+4. **Plan** the change in small, task-sized steps (adopt the `architect` role for
+   design-heavy work).
 5. **Implement a small change** within scope.
 6. **Run validation:** `make check` (format-check + lint + test).
 7. **Report clearly** using the final-response format in `CLAUDE.md`/`AGENTS.md`.
 
-## 7. What not to do
+## 6. What not to do
 
 - **Do not build everything in one task.** Work task-by-task.
 - **Do not rewrite architecture casually.** Contract/architecture changes need an
-  ADR (use the architecture-review skill).
+  ADR (use `.ai/skills/architecture-review.md`).
 - **Do not skip tests.** Behavior ships with tests; mock external systems.
 - **Do not hardcode secrets** in code, YAML, prompts, or `.claude/` config.
-- **Do not duplicate** large docs/skills — reference them.
+- **Do not duplicate** instructions into `.claude/` or any tool folder — keep
+  `.ai/` the single source of truth and reference it.

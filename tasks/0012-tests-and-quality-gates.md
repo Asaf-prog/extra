@@ -12,7 +12,7 @@ Tests accompany every prior task, but this task ensures the **whole pipeline**
 (validate → compile → runtime → prompts → sidecar → tools → trace) is covered and
 that the quality gate is trustworthy.
 
-**Read first:** `AGENTS.md`, `skills/testing-skill.md`,
+**Read first:** `AGENTS.md`, `.ai/skills/testing.md`,
 `docs/DEVELOPMENT_WORKFLOW.md`.
 
 ## Scope

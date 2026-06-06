@@ -11,7 +11,7 @@ their declared context/permission requirements. **No runtime execution.**
 The runtime (0004) operates only on compiled, typed models — never raw YAML.
 This task builds the bridge from validated spec to that model.
 
-**Read first:** `AGENTS.md`, `skills/runtime-engine-skill.md`,
+**Read first:** `AGENTS.md`, `.ai/skills/runtime-engine.md`,
 `docs/ARCHITECTURE.md` (compiler + agent graph layers),
 `docs/adr/0002-yaml-is-compiled-not-executed-directly.md`.
 

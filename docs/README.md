@@ -31,5 +31,6 @@ codebase. Read them before changing anything they cover:
 ## Relationship to other directories
 
 - `AGENTS.md` (root) — the operating manual for agents; references these docs.
-- `skills/` — operational, task-oriented guides that point back to these docs.
+- `.ai/` — the canonical agent-instruction system (skills, roles, workflows)
+  that points back to these docs.
 - `tasks/` — small, ordered implementation units that implement this design.
