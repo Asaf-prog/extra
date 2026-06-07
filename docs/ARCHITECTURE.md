@@ -430,13 +430,13 @@ real external services:
 - a **simple YAML** config (the bundled [`examples/agents.yml`](../examples/agents.yml))
 - **simple prompts**
 
-Target first-run flow (as the phases land):
+First-run flow status:
 
 ```bash
 make install
-agentctl validate examples/agents.yml
-agentctl graph    examples/agents.yml
-agentctl run      examples/agents.yml --message "hello"
+agentctl validate examples/agents.yml                  # implemented
+agentctl graph    examples/agents.yml                  # planned
+agentctl run      examples/agents.yml --message "hello" # planned
 ```
 
 Real LLMs, real MCP servers, real customer plugins, and deployment come **after**
@@ -444,29 +444,30 @@ the mock-based local experience works. See [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
-## 14. First Implementation Step
+## 14. First Implemented Layer
 
-The first **real** implementation step is **YAML schema and validation**
-(task [`0002`](../tasks/0002-yaml-schema-and-validation.md)) — **not** the
-runtime, MCP, sidecar, real LLM, or deployment.
+The first implemented product layer is **YAML schema and validation**
+(task [`0002`](../tasks/0002-yaml-schema-and-validation.md)). It validates
+configuration only — **not** the runtime, MCP, sidecar, real LLM, or deployment.
 
-Validation should cover:
+Validation covers:
 
 - Pydantic models for the spec;
 - a safe YAML loader;
 - **definitions** validation (providers, MCP servers, tools, resolvers, agents,
   orchestrators, prompts);
 - **graph** validation (single root, declared nodes, consistent structure);
-- **reusable instance** validation (repeated occurrences → distinct instances);
+- repeated graph occurrence detection groundwork for future instance ids;
 - **prompt path** validation;
 - **tool / MCP reference** validation;
 - **resolver reference** validation;
 - **no-hardcoded-secrets** validation;
 - tests for valid and invalid specs.
 
-It should use [`examples/agents.yml`](../examples/agents.yml) as a valid fixture
-and [`examples/config.schema.json`](../examples/config.schema.json) as the schema
-source of truth, then add semantic checks the JSON Schema cannot express cleanly.
+It uses [`examples/agents.yml`](../examples/agents.yml) as a valid fixture and
+[`examples/config.schema.json`](../examples/config.schema.json) as the schema
+source of truth, then adds semantic checks the JSON Schema cannot express
+cleanly.
 
 ---
 

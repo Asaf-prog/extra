@@ -3,8 +3,8 @@
 This document describes the declarative Agent Engine configuration. The schema
 source for the current example is [`examples/config.schema.json`](../examples/config.schema.json),
 and the reference sample is [`examples/agents.yml`](../examples/agents.yml).
-Validation and schema models are planned for task `0002`; compilation is planned
-for task `0003`.
+Validation and schema models are implemented; compilation is planned for task
+`0003`.
 
 The YAML has two conceptual halves:
 
@@ -13,8 +13,9 @@ The YAML has two conceptual halves:
 - **`graph` topology** describes how those declared nodes are connected at
   runtime. Indentation is the topology.
 
-The runtime never executes raw YAML. It validates this file, compiles it into a
-typed graph, then runs requests against that graph.
+The runtime never executes raw YAML. The platform validates this file into typed
+spec models first. Later tasks compile validated specs into a typed graph and
+run requests against that graph.
 
 ---
 

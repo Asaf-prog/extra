@@ -39,6 +39,13 @@ pick the next task → read its skill(s) → make a small change → run `make c
 | `make check`   | lint + typecheck + test. **Must pass before finishing.**     |
 | `make clean`   | Remove caches and build artifacts.                           |
 
+Current CLI checks:
+
+```bash
+agentctl version
+agentctl validate examples/agents.yml
+```
+
 ## Coding standards
 
 - Follow the **planned package layout** in `AGENTS.md`. No giant single-file
