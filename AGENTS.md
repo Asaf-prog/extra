@@ -160,9 +160,10 @@ future tool) work in this repo. **Before doing any work, read this file
   testing, documentation-update).
 
 **Tool-specific folders (`.claude/`, `.codex/`, `.agents/`, `.cursor/`) must not
-duplicate instruction content.** They hold only tool configuration and thin
-adapter READMEs that point back to `.ai/`. If a future tool needs a specific
-format, generate **thin adapters only** — never copy skills, roles, or workflows.
+contain manually edited instruction content.** They hold tool configuration,
+adapter READMEs, and generated adapters derived from `.ai/`. Generated adapters
+may contain full skill, role, and workflow content for tool compatibility, but
+`.ai/` remains the only editable source.
 
 Always read [`.ai/skills/project-architecture.md`](.ai/skills/project-architecture.md)
 first; then pick by the *kind* of task and the *area* of the system.
@@ -292,16 +293,17 @@ This repository is prepared for **Claude Code**. See
 - **`CLAUDE.md` is the project entrypoint** Claude Code reads first. It mirrors
   this manual's rules and points to `.ai/`; if the two ever disagree,
   **`AGENTS.md` wins**.
-- **Skills are not edited under `.claude/`.** `.claude/skills/<name>/SKILL.md`
-  contains **generated full skill copies** — produced by `make sync-skills` from
-  `.ai/skills/<name>.md`. Edit the canonical `.ai/` file, then regenerate.
-  `.ai/` remains the single source of truth (see §5). `.claude/` otherwise holds
-  only `settings.json` (tool permissions) and a thin `README.md` that points to `.ai/`.
+- **Skills, roles, and workflows are not edited under `.claude/`.**
+  `.claude/skills/<name>/SKILL.md`, `.claude/agents/<name>.md`, and
+  `.claude/workflows/<name>.md` contain **generated full-content adapters** —
+  produced by `make sync-ai` from `.ai/`. Edit the canonical `.ai/` file, then
+  regenerate. `.ai/` remains the single source of truth (see §5).
 - **Role/persona definitions** (`architect`, `code-reviewer`, `test-engineer`,
   `documentation-writer`) live under [`.ai/roles/`](.ai/roles/), not in
   `.claude/agents/`.
-- **Shared, conservative settings live in `.claude/settings.json`.** Local/private
-  config (`CLAUDE.local.md`, `.claude/settings.local.json`) is git-ignored.
+- **Shared, conservative settings live in `.claude/settings.json`.**
+  Local/private config (`CLAUDE.local.md`, `.claude/settings.local.json`) is
+  git-ignored.
 
 ### Per-task rule
 

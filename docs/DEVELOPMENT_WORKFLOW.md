@@ -26,18 +26,17 @@ pick the next task → read its skill(s) → make a small change → run `make c
   in `pyproject.toml`.
 - Set up with `make install`.
 
-> Foundation-phase note: until task 0001 creates the package skeleton, some
-> `make` targets print a notice instead of doing work. That is expected.
-
 ## Commands
 
 | Command        | Purpose                                                      |
 | -------------- | ------------------------------------------------------------ |
 | `make install` | Install dependencies / set up the dev environment.           |
+| `make sync-ai` | Regenerate tool adapters from `.ai/`.                        |
 | `make format`  | Auto-format code (ruff).                                     |
-| `make lint`    | Static analysis (ruff check + mypy).                         |
+| `make lint`    | Static analysis (ruff check).                                |
+| `make typecheck` | Type-check the codebase (mypy).                            |
 | `make test`    | Run the test suite (pytest).                                 |
-| `make check`   | format-check + lint + test. **Must pass before finishing.**  |
+| `make check`   | lint + typecheck + test. **Must pass before finishing.**     |
 | `make clean`   | Remove caches and build artifacts.                           |
 
 ## Coding standards

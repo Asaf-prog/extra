@@ -1,7 +1,7 @@
 # Prompt Rendering
 
-Prompt rendering is implemented in task `0005`. This document describes the
-current design contract.
+Prompt rendering is planned for task `0005`. This document describes the design
+contract the implementation must satisfy.
 
 Prompt text lives in files, not inline YAML. Nodes reference prompt files under a
 `prompts:` object:

@@ -10,14 +10,18 @@ effectively. This complements `AGENTS.md` (the tool-agnostic manual) and
 
 All agent instructions — skills, roles, and workflows — live in one canonical,
 tool-agnostic place: **`.ai/`**. Claude Code reads `CLAUDE.md` as its entrypoint,
-which points to `.ai/`. `.claude/` holds only tool configuration and a thin
-adapter README; it contains **no duplicated instructions**.
+which points to `.ai/`. `.claude/` holds tool configuration plus generated
+full-content adapters derived from `.ai/`; generated adapters are not edited
+directly.
 
 ```
 CLAUDE.md                      ← Claude entrypoint (mission, rules, skill/role map)
 .claude/
 ├── settings.json              ← conservative, shared project settings (permissions)
-└── README.md                  ← thin adapter; points to .ai/
+├── README.md                  ← adapter guide; points to .ai/
+├── skills/<name>/SKILL.md     ← generated from .ai/skills/
+├── agents/<name>.md           ← generated from .ai/roles/
+└── workflows/<name>.md        ← generated from .ai/workflows/
 docs/CLAUDE_CODE_WORKFLOW.md   ← this file
 .ai/                           ← canonical, tool-agnostic instruction system
 ├── README.md                  ← index
@@ -45,10 +49,17 @@ There is **one** instruction system, under `.ai/`:
 - `.ai/workflows/<name>.md` — recipes that combine roles + skills for a common
   task (`feature-task`, `code-review`, `testing`, `documentation-update`).
 
-Claude Code, Codex, Cursor, and any future tool read the same files. **Do not
-copy these into `.claude/` (or any tool folder).** If a tool needs a specific
-format in the future, generate a *thin adapter* that references `.ai/` — never a
-duplicate.
+Claude Code, Codex, Cursor, and any future tool derive from the same files.
+Generated adapters may copy the full canonical content into tool-specific
+formats, but `.ai/` remains the only editable source.
+
+After editing `.ai/**`, regenerate adapters:
+
+```bash
+make sync-ai
+```
+
+`make sync-skills` is a backward-compatible alias.
 
 Available skills: `project-architecture`, `senior-python-engineering`,
 `code-review`, `architecture-review`, `refactoring`, `testing`, `documentation`,
@@ -77,7 +88,7 @@ Adopt a role from `.ai/roles/` when the work matches it:
 4. **Plan** the change in small, task-sized steps (adopt the `architect` role for
    design-heavy work).
 5. **Implement a small change** within scope.
-6. **Run validation:** `make check` (format-check + lint + test).
+6. **Run validation:** `make check` (lint + typecheck + test).
 7. **Report clearly** using the final-response format in `CLAUDE.md`/`AGENTS.md`.
 
 ## 6. What not to do
@@ -87,5 +98,5 @@ Adopt a role from `.ai/roles/` when the work matches it:
   ADR (use `.ai/skills/architecture-review.md`).
 - **Do not skip tests.** Behavior ships with tests; mock external systems.
 - **Do not hardcode secrets** in code, YAML, prompts, or `.claude/` config.
-- **Do not duplicate** instructions into `.claude/` or any tool folder — keep
-  `.ai/` the single source of truth and reference it.
+- **Do not edit generated adapters** in `.claude/` or any tool folder. Keep
+  `.ai/` the single source of truth and regenerate with `make sync-ai`.

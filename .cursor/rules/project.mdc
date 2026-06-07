@@ -13,8 +13,11 @@ Canonical instructions live under:
 - .ai/roles/
 - .ai/workflows/
 
-Do not duplicate skills, roles, or workflows under .cursor/. This file is a thin
-adapter that points to `.ai/` — the single source of truth.
+Generated Cursor rule adapters live under `.cursor/rules/skills/`,
+`.cursor/rules/roles/`, and `.cursor/rules/workflows/`. They contain full
+canonical content for Cursor compatibility, but `.ai/` is the single editable
+source of truth. Do not edit generated adapters directly; edit `.ai/**` and run
+`make sync-ai`.
 
 Before editing code, read the relevant `.ai/` skill. Always read
 `.ai/skills/project-architecture.md` first; if a task spans multiple areas, read

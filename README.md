@@ -31,12 +31,13 @@ specification** of their system rather than its mechanics.
 
 ## 3. Vision
 
-- A single YAML file fully describes an agent system.
+- A YAML specification describes the desired agent system: what exists and how
+  it is connected.
 - The specification is **validated** and **compiled** into a typed agent graph.
 - A **long-lived runtime** executes requests against that graph.
 - **Prompts are files** rendered per request from resolver values.
-- **Customer-specific logic** lives in customer Python plugins, not in the
-  generic engine.
+- **Customer-specific logic** lives in customer plugins, generated resolvers, or
+  optional sidecar boundaries, not in the generic engine.
 - The engine is **stateless with respect to conversation**: callers send a
   complete conversation each invocation.
 - Every request produces a **trace** for observability and debugging.
@@ -62,9 +63,13 @@ Repository foundation phase. See the [Roadmap](docs/ROADMAP.md) and the
 
 ## 5. Planned architecture
 
-```
-config.yml → validate → compile → CompiledAgentGraph → RuntimeEngine
-           → ExecutionContext (per request) → route graph → response + trace
+```text
+agent.yml → YAML Loader → Validator → Compiler → CompiledAgentGraph
+          → RuntimeEngine → ExecutionContext per request
+          → Security / Context Gate → Resolver / Sidecar Context Resolution
+          → Prompt Rendering → Recursive Agent Execution
+          → Tool Permission Enforcement → MCP / Tool Calls
+          → Response + Trace
 ```
 
 Layers: spec → validation → compiler → agent graph → runtime → prompt rendering

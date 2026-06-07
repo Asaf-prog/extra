@@ -3,8 +3,8 @@
 This document describes the declarative Agent Engine configuration. The schema
 source for the current example is [`examples/config.schema.json`](../examples/config.schema.json),
 and the reference sample is [`examples/agents.yml`](../examples/agents.yml).
-Validation and schema models are implemented in task `0002`; compilation is task
-`0003`.
+Validation and schema models are planned for task `0002`; compilation is planned
+for task `0003`.
 
 The YAML has two conceptual halves:
 

@@ -390,7 +390,7 @@ The intended guarantees:
 
 What is enforced **today** vs. **later**:
 
-- **Today (planned for the MVP):** protected-node access filtering via the access
+- **MVP target:** protected-node access filtering via the access
   plugin; trusted context passed to tools via `ctx`; validation of tool/MCP ids;
   secrets kept out of YAML and redacted in traces.
 - **Later (deliberate schema addition):** per-tool `input_policy` /

@@ -1,7 +1,9 @@
-# `.claude/` — Claude Code adapter (no duplicated instructions)
+# `.claude/` — Claude Code adapter
 
-Claude-specific duplicate skills and agents are intentionally **not** stored
-here. The canonical, tool-agnostic project instructions live under [`.ai/`](../.ai/).
+The canonical, tool-agnostic project instructions live under [`.ai/`](../.ai/).
+Claude-specific instruction files in this folder are generated adapters. They
+contain full canonical content for Claude compatibility, but they are not
+editable source files.
 
 Start with:
 
@@ -11,14 +13,17 @@ Start with:
 - [`../.ai/roles/`](../.ai/roles/) — reusable agent personas.
 - [`../.ai/workflows/`](../.ai/workflows/) — task workflows.
 
-This folder contains only Claude-specific **tool configuration**:
+This folder contains Claude-specific **tool configuration** and generated
+adapters:
 
 - `settings.json` — shared, conservative permissions for Claude Code.
+- `skills/<name>/SKILL.md` — generated from `.ai/skills/<name>.md`.
+- `agents/<name>.md` — generated from `.ai/roles/<name>.md`.
+- `workflows/<name>.md` — generated from `.ai/workflows/<name>.md`.
 
 Local/private config (`CLAUDE.local.md`, `.claude/settings.local.json`) is
 git-ignored.
 
-Generated Claude skills live under `.claude/skills/<name>/SKILL.md`.
-Regenerate them with `make sync-skills` after editing `.ai/skills/`. These files
-contain the full skill content from `.ai/skills/<name>.md` — do not edit them
-directly.
+Regenerate adapters with `make sync-ai` after editing `.ai/**`.
+`make sync-skills` remains a backward-compatible alias. Do not edit generated
+adapter files directly.

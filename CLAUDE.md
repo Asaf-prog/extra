@@ -10,9 +10,11 @@ Cursor, and any future tool. Claude Code should start from `AGENTS.md`,
 `CLAUDE.md`, and [`.ai/README.md`](.ai/README.md), and read the relevant
 `.ai/skills/*` file **before editing**.
 
-`.claude/skills/` is **generated output** — do not edit it. Run
-`make sync-skills` (or `make install`) to regenerate it from `.ai/skills/`.
-`.ai/` is the single source of truth for all skills.
+`.claude/skills/`, `.claude/agents/`, and `.claude/workflows/` are
+**generated output** — do not edit them. Run `make sync-ai` (or `make install`)
+to regenerate them from `.ai/`. `make sync-skills` remains a
+backward-compatible alias. `.ai/` is the single source of truth for all skills,
+roles, and workflows.
 
 ---
 
@@ -111,13 +113,11 @@ the relevant skill.
 
 ```bash
 make format   # auto-format (ruff)
-make lint     # ruff + mypy
+make lint     # ruff check
+make typecheck # type-check (mypy)
 make test     # pytest
-make check    # format-check + lint + test  ← must pass before finishing a task
+make check    # lint + typecheck + test  ← must pass before finishing a task
 ```
-
-Foundation-phase note: until task `0001` installs tooling, these targets print a
-notice and exit cleanly. That is expected.
 
 ## 8. Final response format
 
@@ -138,5 +138,6 @@ After a task, report:
 - Do not skip tests; do not hardcode secrets.
 - Do not change architecture decisions without an ADR (see
   `.ai/skills/architecture-review.md`).
-- Do not recreate `.claude/skills/` or `.claude/agents/`; do not duplicate
-  `.ai/` content. `.claude/` holds only `settings.json` and a thin `README.md`.
+- Do not edit `.claude/skills/`, `.claude/agents/`, or `.claude/workflows/`
+  directly. They are generated full-content adapters from `.ai/`; regenerate
+  them with `make sync-ai`.

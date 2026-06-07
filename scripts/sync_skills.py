@@ -106,6 +106,10 @@ def split_instruction_content(text: str) -> tuple[dict[str, object], str]:
     return fields, body
 
 
+# Backward-compatible helper name used by existing tests and older callers.
+split_skill_content = split_instruction_content
+
+
 def read_source_instruction(path: Path, *, kind: str) -> tuple[str, str, str]:
     """Return name, description, and body for a canonical instruction file."""
     text = path.read_text()
@@ -306,8 +310,7 @@ def remove_stale_adapters(
     cursor_rules_dir = root / ".cursor" / "rules"
     if cursor_rules_dir.exists():
         for legacy_skill_file in cursor_rules_dir.glob("*.mdc"):
-            if legacy_skill_file.stem in skill_names:
-                remove_generated_file(legacy_skill_file, removed)
+            remove_generated_file(legacy_skill_file, removed)
 
     remove_markdown_stale(root / ".cursor" / "rules" / "skills", skill_names, removed)
     remove_markdown_stale(

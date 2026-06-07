@@ -79,13 +79,26 @@ End-to-end recipes that combine roles and skills for a common task.
 | [testing](workflows/testing.md)                                | Adding or running tests for a change.          |
 | [documentation-update](workflows/documentation-update.md)      | Updating docs/ADRs after a change.             |
 
-## Tool-specific folders must not duplicate instructions
+## Generated tool-specific adapters
 
 `.claude/`, `.codex/`, `.cursor/`, etc. exist only for **tool configuration**
-(permissions, model settings) and **thin adapters** that point back here. They
-must **not** contain copied skills, roles, or workflows.
+(permissions, model settings) and **generated adapters** derived from `.ai/`.
+They must **not** contain manually edited skills, roles, or workflows.
 
-If a future tool needs a specific format (e.g. per-skill `SKILL.md` directories
-or `.toml` agent definitions), generate **thin adapters that reference `.ai/`**
-— never copy the content. Keeping one source of truth is the whole point of
-this directory.
+Generated adapters contain the full canonical content so each tool can read the
+format it expects, but `.ai/` remains the only editable source. Do not edit
+generated adapter files directly; edit `.ai/**` and run:
+
+```bash
+make sync-ai
+```
+
+`make sync-skills` is kept as a backward-compatible alias.
+
+Supported generated adapter layouts:
+
+| Tool | Generated paths |
+| ---- | --------------- |
+| Claude | `.claude/skills/<skill-name>/SKILL.md`, `.claude/agents/<role-name>.md`, `.claude/workflows/<workflow-name>.md` |
+| Cursor | `.cursor/rules/skills/<skill-name>.mdc`, `.cursor/rules/roles/<role-name>.mdc`, `.cursor/rules/workflows/<workflow-name>.mdc` |
+| Codex | `.codex/skills/<skill-name>.md`, `.codex/agents/<role-name>.md`, `.codex/workflows/<workflow-name>.md` |

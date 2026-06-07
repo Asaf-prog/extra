@@ -1,8 +1,9 @@
-# `.codex/` — Codex adapter (no duplicated instructions)
+# `.codex/` — Codex adapter
 
-Codex-specific duplicate skills and agent definitions are intentionally **not**
-stored here. The canonical, tool-agnostic project instructions live under
-[`.ai/`](../.ai/).
+The canonical, tool-agnostic project instructions live under [`.ai/`](../.ai/).
+Codex-specific instruction files in this folder are generated adapters. They
+contain full canonical content for Codex compatibility, but they are not editable
+source files.
 
 Start with:
 
@@ -13,6 +14,12 @@ Start with:
   Codex agent definitions).
 - [`../.ai/workflows/`](../.ai/workflows/) — task workflows.
 
-If Codex needs `.codex/agents/*.toml` definitions in the future, generate them
-as **thin adapters** whose `developer_instructions` point to the matching role
-in `.ai/roles/` — never copy the content.
+Generated Codex adapters live at:
+
+- `.codex/skills/<skill-name>.md`
+- `.codex/agents/<role-name>.md`
+- `.codex/workflows/<workflow-name>.md`
+
+Regenerate adapters with `make sync-ai` after editing `.ai/**`.
+`make sync-skills` remains a backward-compatible alias. Do not edit generated
+adapter files directly.
