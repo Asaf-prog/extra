@@ -1,4 +1,4 @@
-"""Tests for scripts/sync_skills.py."""
+"""Tests for tools/skills."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPT_PATH = ROOT / "scripts" / "sync_skills.py"
+SCRIPT_PATH = ROOT / "tools" / "skills" / "__init__.py"
 
 
 def load_sync_skills():

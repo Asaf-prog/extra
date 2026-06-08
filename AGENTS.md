@@ -296,7 +296,7 @@ This repository is prepared for **Claude Code**. See
 - **Skills, roles, and workflows are not edited under `.claude/`.**
   `.claude/skills/<name>/SKILL.md`, `.claude/agents/<name>.md`, and
   `.claude/workflows/<name>.md` contain **generated full-content adapters** —
-  produced by `make sync-ai` from `.ai/`. Edit the canonical `.ai/` file, then
+  produced by `make generate-ai` from `.ai/`. Edit the canonical `.ai/` file, then
   regenerate. `.ai/` remains the single source of truth (see §5).
 - **Role/persona definitions** (`architect`, `code-reviewer`, `test-engineer`,
   `documentation-writer`) live under [`.ai/roles/`](.ai/roles/), not in
