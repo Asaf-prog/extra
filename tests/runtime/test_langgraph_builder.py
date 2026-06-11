@@ -15,24 +15,25 @@ from langchain_core.messages import AIMessage
 from agentplatform.compiler import compile_spec
 from agentplatform.runtime import build_langgraph
 from agentplatform.spec import load_spec
-from agentplatform.spec.models import ModelSpec
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "agents.yml"
 
 
 class RecordingFactory:
-    """A model factory that records the specs it is asked to build.
+    """A model factory that records the configs it is asked to build.
 
     Each model echoes its resolved provider:name, so an agent's answer reveals
     which model that node actually used.
     """
 
     def __init__(self) -> None:
-        self.specs: list[ModelSpec] = []
+        self.calls: list[tuple[str, str, float | None]] = []
 
-    def __call__(self, spec: ModelSpec) -> GenericFakeChatModel:
-        self.specs.append(spec)
-        reply = AIMessage(content=f"answer from {spec.provider}:{spec.name}")
+    def __call__(
+        self, provider: str, name: str, temperature: float | None
+    ) -> GenericFakeChatModel:
+        self.calls.append((provider, name, temperature))
+        reply = AIMessage(content=f"answer from {provider}:{name}")
         return GenericFakeChatModel(messages=cycle([reply]))
 
 
@@ -82,7 +83,7 @@ def test_each_agent_builds_its_own_resolved_model(factory: RecordingFactory) -> 
     graph = compile_spec(load_spec(EXAMPLE).spec)
     build_langgraph(graph, model_factory=factory)
 
-    built = {f"{s.provider}:{s.name}" for s in factory.specs}
+    built = {f"{provider}:{name}" for provider, name, _ in factory.calls}
     # All four agents inherit the default (haiku).
     assert built == {"anthropic:claude-haiku-4-5"}
-    assert len(factory.specs) == 4  # domestic, international, super, admin
+    assert len(factory.calls) == 4  # domestic, international, super, admin

@@ -31,7 +31,7 @@ run without tools or resolver context.
 
 Per-node models (ADR 0006, ADR 0008)
 -------------------------------------
-Each node's resolved ``ModelSpec`` is fed to ``model_factory`` once at
+Each node's resolved model config is fed to ``model_factory`` once at
 graph-build time — production uses :func:`build_chat_model`; tests inject a
 fake that stays offline.
 """
@@ -48,13 +48,17 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
-from agentplatform.graph.models import CompiledAgentGraph, GraphInstance
+from agentplatform.graph.models import (
+    AgentDeclaration,
+    CompiledAgentGraph,
+    GraphInstance,
+    OrchestratorDeclaration,
+)
 from agentplatform.models import build_chat_model
 from agentplatform.runtime.plugin_loader import PluginLoader
 from agentplatform.runtime.state import GraphState
-from agentplatform.spec.models import ModelSpec
 
-ModelFactory = Callable[[ModelSpec], BaseChatModel]
+ModelFactory = Callable[[str, str, float | None], BaseChatModel]
 
 
 class _RouteDecision(BaseModel):
@@ -82,27 +86,27 @@ def build_langgraph(
         - System-prompt loading from ``.md`` files.
         - Tool and resolver loading from ``plugins/``.
     model_factory:
-        Builds a ``BaseChatModel`` from a ``ModelSpec``.  Override in tests.
+        Builds a ``BaseChatModel`` from ``(provider, name, temperature)``.
+        Override in tests.
     """
     loader = PluginLoader(base_dir) if base_dir is not None else None
     builder = StateGraph(GraphState)
 
     for instance in graph.instances_by_id.values():
         node = _make_node(instance, model_factory, loader, base_dir)
-        # LangGraph's add_node overloads don't resolve cleanly for a plain
-        # Callable returning a partial-state dict; covered by runtime tests.
         builder.add_node(instance.instance_id, node)  # type: ignore[call-overload]
 
     builder.add_edge(START, graph.root.instance_id)
 
     for instance in graph.instances_by_id.values():
         if instance.children:
+            assert isinstance(instance.declaration, OrchestratorDeclaration)
             routes: dict[Hashable, str] = {
                 child.instance_id: child.instance_id for child in instance.children
             }
             builder.add_conditional_edges(
                 instance.instance_id,
-                _make_router(instance, model_factory, base_dir),
+                _make_router(instance, instance.declaration, model_factory, base_dir),
                 routes,
             )
         else:
@@ -122,29 +126,38 @@ def _make_node(
     loader: PluginLoader | None,
     base_dir: Path | None,
 ) -> Callable[[GraphState], dict[str, object]]:
-    if instance.node_type == "agent":
-        return _make_agent_node(instance, model_factory, loader, base_dir)
-    # Orchestrator: just records itself as visited; routing is on the edge.
-    def node(state: GraphState) -> dict[str, object]:
-        return {"visited": [*state.get("visited", []), instance.instance_id]}
+    match instance.declaration:
+        case OrchestratorDeclaration():
+            instance_id = instance.instance_id
 
-    return node
+            def orchestrator_node(state: GraphState) -> dict[str, object]:
+                return {"visited": [*state.get("visited", []), instance_id]}
+
+            return orchestrator_node
+
+        case AgentDeclaration() as decl:
+            return _make_agent_node(instance, decl, model_factory, loader, base_dir)
+        case _:
+            raise TypeError(f"Unknown declaration type: {type(instance.declaration)}")
 
 
 def _make_agent_node(
     instance: GraphInstance,
+    declaration: AgentDeclaration,
     model_factory: ModelFactory,
     loader: PluginLoader | None,
     base_dir: Path | None,
 ) -> Callable[[GraphState], dict[str, object]]:
     """Agent (leaf) node: resolves context, builds prompt, calls model in a loop."""
+    instance_id = instance.instance_id
+
     # Build tools once at graph-build time.
     tools: list[BaseTool] = []
     if loader is not None:
-        for resolved_tool in instance.declaration.tools:
-            tools.append(loader.load_tool(resolved_tool.id, resolved_tool.spec.description))
+        for resolved_tool in declaration.tools:
+            tools.append(loader.load_tool(resolved_tool.id, resolved_tool.description))
 
-    model: BaseChatModel = _build_node_model(instance, model_factory)
+    model: BaseChatModel = _build_node_model(declaration, model_factory)
     if tools:
         model = model.bind_tools(tools)  # type: ignore[assignment]
 
@@ -154,11 +167,11 @@ def _make_agent_node(
         # Resolve context variables (called once per request, before LLM).
         context: dict[str, str] = {}
         if loader is not None:
-            for resolved_resolver in instance.declaration.resolvers:
+            for resolved_resolver in declaration.resolvers:
                 fn = loader.load_resolver(resolved_resolver.id)
                 context[resolved_resolver.id] = str(fn())
 
-        system_prompt = _load_system_prompt(instance, context, base_dir)
+        system_prompt = _load_system_prompt(declaration, context, base_dir)
         messages: list = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=state.get("message", "")),
@@ -174,7 +187,7 @@ def _make_agent_node(
             response = model.invoke(messages)
 
         return {
-            "visited": [*state.get("visited", []), instance.instance_id],
+            "visited": [*state.get("visited", []), instance_id],
             "answer": _as_text(response.content),
         }
 
@@ -188,6 +201,7 @@ def _make_agent_node(
 
 def _make_router(
     instance: GraphInstance,
+    declaration: OrchestratorDeclaration,
     model_factory: ModelFactory,
     base_dir: Path | None,
 ) -> Callable[[GraphState], str]:
@@ -208,10 +222,16 @@ def _make_router(
 
     # Build the LLM routing chain once at graph-build time (only with base_dir).
     routing_chain = None
-    if base_dir is not None and instance.declaration.model is not None:
-        routing_chain = model_factory(instance.declaration.model).with_structured_output(
-            _RouteDecision
-        )
+    if (
+        base_dir is not None
+        and declaration.model_provider is not None
+        and declaration.model_name is not None
+    ):
+        routing_chain = model_factory(
+            declaration.model_provider,
+            declaration.model_name,
+            declaration.model_temperature,
+        ).with_structured_output(_RouteDecision)
 
     def route(state: GraphState) -> str:
         # 1. Explicit override — lets tests and callers steer without an LLM call.
@@ -222,7 +242,7 @@ def _make_router(
 
         # 2. LLM routing.
         if routing_chain is not None:
-            orchestrator_prompt = _load_orchestrator_prompt(instance, base_dir)
+            orchestrator_prompt = _load_orchestrator_prompt(declaration, base_dir)
             system = (
                 f"{orchestrator_prompt}\n\n"
                 f"Available agents:\n{children_desc}\n\n"
@@ -251,42 +271,43 @@ def _make_router(
 # ---------------------------------------------------------------------------
 
 
-def _load_orchestrator_prompt(instance: GraphInstance, base_dir: Path | None) -> str:
+def _load_orchestrator_prompt(declaration: OrchestratorDeclaration, base_dir: Path | None) -> str:
     """Load the orchestrator routing instructions from its .md file."""
-    prompts = instance.declaration.prompts
-    if base_dir is not None and prompts is not None and prompts.orchestrator is not None:
-        path = base_dir / prompts.orchestrator
+    if base_dir is not None and declaration.orchestrator_prompt is not None:
+        path = base_dir / declaration.orchestrator_prompt
         if path.is_file():
             return path.read_text(encoding="utf-8")
-    return instance.declaration.description
+    return declaration.description
 
 
 def _load_system_prompt(
-    instance: GraphInstance,
+    declaration: AgentDeclaration,
     context: dict[str, str],
     base_dir: Path | None,
 ) -> str:
     """Load and render the agent's system prompt, injecting resolver values."""
-    prompts = instance.declaration.prompts
-    if base_dir is not None and prompts is not None and prompts.system is not None:
-        path = base_dir / prompts.system
+    if base_dir is not None and declaration.system_prompt is not None:
+        path = base_dir / declaration.system_prompt
         if path.is_file():
             raw = path.read_text(encoding="utf-8")
             for key, value in context.items():
                 raw = raw.replace("{{ " + key + " }}", value)
                 raw = raw.replace("{{" + key + "}}", value)
             return raw
-    return instance.declaration.description
+    return declaration.description
 
 
-def _build_node_model(instance: GraphInstance, model_factory: ModelFactory) -> BaseChatModel:
-    spec = instance.declaration.model
-    if spec is None:
+def _build_node_model(declaration: AgentDeclaration, model_factory: ModelFactory) -> BaseChatModel:
+    if declaration.model_provider is None or declaration.model_name is None:
         raise ValueError(
-            f"Agent node '{instance.instance_id}' has no resolved model; "
+            f"Agent node '{declaration.node_id}' has no resolved model; "
             "declare a model on the node or a default under 'defaults.model'."
         )
-    return model_factory(spec)
+    return model_factory(
+        declaration.model_provider,
+        declaration.model_name,
+        declaration.model_temperature,
+    )
 
 
 def _as_text(content: object) -> str:

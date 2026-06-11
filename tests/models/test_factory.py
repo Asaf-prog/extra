@@ -1,4 +1,4 @@
-"""build_chat_model maps a ModelSpec to a provider via init_chat_model.
+"""build_chat_model maps flat model config to a provider via init_chat_model.
 
 We patch init_chat_model so the test stays offline and asserts the mapping
 (provider, name, temperature) rather than constructing a real provider client.
@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 import agentplatform.models.factory as factory
-from agentplatform.spec.models import ModelSpec
 
 
 def test_passes_provider_name_and_temperature(monkeypatch) -> None:
@@ -21,8 +20,9 @@ def test_passes_provider_name_and_temperature(monkeypatch) -> None:
 
     monkeypatch.setattr(factory, "init_chat_model", fake_init)
 
-    spec = ModelSpec(provider="anthropic", name="claude-sonnet-4-6", temperature=0.7)
-    result = factory.build_chat_model(spec)
+    result = factory.build_chat_model(
+        provider="anthropic", name="claude-sonnet-4-6", temperature=0.7
+    )
 
     assert result == "fake-model"
     (args, kwargs) = calls[0]
@@ -40,7 +40,7 @@ def test_omits_temperature_when_unset(monkeypatch) -> None:
 
     monkeypatch.setattr(factory, "init_chat_model", fake_init)
 
-    factory.build_chat_model(ModelSpec(provider="openai", name="gpt-x"))
+    factory.build_chat_model(provider="openai", name="gpt-x")
 
     assert captured["model_provider"] == "openai"
     assert "temperature" not in captured

@@ -3,33 +3,30 @@
 Input is the *validated* ``AgentEngineSpec`` (from the spec layer), never raw
 YAML (ADR 0002). The compiler does two jobs:
 
-1. Build one resolved ``NodeDeclaration`` per orchestrator/agent — references to
-   resolvers/tools/MCPs become direct typed links, and the effective model is
-   computed from defaults + node override.
+1. Build one resolved ``NodeDeclaration`` per orchestrator/agent — spec types
+   are flattened into graph-native fields, references resolved, and the
+   effective model computed from defaults + node override.
 2. Expand the ``graph`` tree into ``GraphInstance`` occurrences, each with a
    stable ``instance_id`` and a pointer back to its shared declaration
    (ADR 0006).
 
-Validation (task 0002) already guarantees the input is well-formed: exactly one
-graph root, every graph id is declared, all references resolve, and no cycles.
+Validation (task 0002) already guarantees the input is well-formed: exactly
+one graph root, every graph id is declared, all references resolve, no cycles.
 """
 
 from __future__ import annotations
 
 from agentplatform.graph.models import (
+    AgentDeclaration,
     CompiledAgentGraph,
     GraphInstance,
     NodeDeclaration,
+    OrchestratorDeclaration,
     ResolvedMcp,
     ResolvedResolver,
     ResolvedTool,
 )
-from agentplatform.spec.models import (
-    AgentEngineSpec,
-    AgentSpec,
-    ModelSpec,
-    OrchestratorSpec,
-)
+from agentplatform.spec.models import AgentEngineSpec, AgentSpec, ModelSpec, OrchestratorSpec
 
 
 def compile_spec(spec: AgentEngineSpec) -> CompiledAgentGraph:
@@ -37,12 +34,12 @@ def compile_spec(spec: AgentEngineSpec) -> CompiledAgentGraph:
     default_model = spec.defaults.model if spec.defaults else None
     declarations = _build_declarations(spec, default_model)
 
-    root_id = next(iter(spec.graph))
-    root = _build_instance(
+    root_id, root_children = next(iter(spec.graph.items()))
+    root = _expand_node(
         node_id=root_id,
-        children=spec.graph[root_id],
+        children=root_children,
         parent_instance_id=None,
-        parent_path="",
+        parent_path=None,
         declarations=declarations,
     )
 
@@ -62,80 +59,107 @@ def _build_declarations(
     default_model: ModelSpec | None,
 ) -> dict[str, NodeDeclaration]:
     declarations: dict[str, NodeDeclaration] = {}
-    for node_id, orchestrator in spec.orchestrators.items():
-        declarations[node_id] = _declare_node(node_id, orchestrator, spec, default_model)
-    for node_id, agent in spec.agents.items():
-        declarations[node_id] = _declare_node(node_id, agent, spec, default_model)
+    for node_id, o in spec.orchestrators.items():
+        declarations[node_id] = _compile_orchestrator(node_id, o, default_model)
+    for node_id, a in spec.agents.items():
+        declarations[node_id] = _compile_agent(node_id, a, spec, default_model)
     return declarations
 
 
-def _declare_node(
+def _compile_orchestrator(
     node_id: str,
-    node_spec: OrchestratorSpec | AgentSpec,
-    spec: AgentEngineSpec,
+    spec: OrchestratorSpec,
     default_model: ModelSpec | None,
-) -> NodeDeclaration:
-    return NodeDeclaration(
+) -> OrchestratorDeclaration:
+    provider, name, temperature = _resolve_model(spec.model, default_model)
+    return OrchestratorDeclaration(
         node_id=node_id,
-        node_type="agent" if isinstance(node_spec, AgentSpec) else "orchestrator",
-        description=node_spec.description,
-        model=node_spec.model or default_model,
-        prompts=node_spec.prompts,
-        resolvers=_resolve_resolvers(node_spec.resolvers),
-        tools=(
-            tuple(ResolvedTool(id=ref, spec=spec.tools[ref]) for ref in node_spec.tools)
-            if isinstance(node_spec, AgentSpec) else ()
-        ),
-        mcps=(
-            tuple(ResolvedMcp(id=ref, spec=spec.mcps[ref]) for ref in node_spec.mcps)
-            if isinstance(node_spec, AgentSpec) else ()
-        ),
-        protected=node_spec.protected,
+        description=spec.description,
+        model_provider=provider,
+        model_name=name,
+        model_temperature=temperature,
+        orchestrator_prompt=spec.prompts.orchestrator,
+        system_prompt=spec.prompts.system,
+        user_prompt=spec.prompts.user,
+        resolvers=tuple(ResolvedResolver(id=r) for r in spec.resolvers),
+        protected=spec.protected,
     )
 
 
-def _resolve_resolvers(refs: list[str]) -> tuple[ResolvedResolver, ...]:
-    return tuple(ResolvedResolver(id=ref) for ref in refs)
+def _compile_agent(
+    node_id: str,
+    spec: AgentSpec,
+    engine_spec: AgentEngineSpec,
+    default_model: ModelSpec | None,
+) -> AgentDeclaration:
+    provider, name, temperature = _resolve_model(spec.model, default_model)
+    return AgentDeclaration(
+        node_id=node_id,
+        description=spec.description,
+        model_provider=provider,
+        model_name=name,
+        model_temperature=temperature,
+        system_prompt=spec.prompts.system if spec.prompts else None,
+        user_prompt=spec.prompts.user if spec.prompts else None,
+        resolvers=tuple(ResolvedResolver(id=r) for r in spec.resolvers),
+        tools=tuple(
+            ResolvedTool(id=ref, description=engine_spec.tools[ref].description)
+            for ref in spec.tools
+        ),
+        mcps=tuple(
+            ResolvedMcp(id=ref, url=engine_spec.mcps[ref].url)
+            for ref in spec.mcps
+        ),
+        protected=spec.protected,
+    )
 
 
-def _build_instance(
+def _resolve_model(
+    node_model: ModelSpec | None,
+    default_model: ModelSpec | None,
+) -> tuple[str | None, str | None, float | None]:
+    """Return (provider, name, temperature) from the effective model, or all None."""
+    m = node_model or default_model
+    if m is None:
+        return None, None, None
+    return m.provider, m.name, m.temperature
+
+
+def _expand_node(
     *,
     node_id: str,
     children: object,
     parent_instance_id: str | None,
-    parent_path: str,
+    parent_path: str | None,
     declarations: dict[str, NodeDeclaration],
 ) -> GraphInstance:
+    """Recursively expand a spec graph node into a ``GraphInstance`` tree.
+
+    Computes a stable ``instance_id`` path (e.g. ``main_router/super_agent``),
+    looks up the pre-compiled declaration, and recurses into children.
+    """
     path = f"{parent_path}/{node_id}" if parent_path else node_id
-    declaration = declarations[node_id]
+    child_map = children if isinstance(children, dict) else {}
 
     child_instances = tuple(
-        _build_instance(
+        _expand_node(
             node_id=child_id,
             children=grandchildren,
             parent_instance_id=path,
             parent_path=path,
             declarations=declarations,
         )
-        for child_id, grandchildren in _child_items(children)
+        for child_id, grandchildren in child_map.items()
     )
 
     return GraphInstance(
         instance_id=path,
         node_id=node_id,
-        node_type=declaration.node_type,
         parent_instance_id=parent_instance_id,
         path=path,
-        declaration=declaration,
+        declaration=declarations[node_id],
         children=child_instances,
     )
-
-
-def _child_items(children: object) -> list[tuple[str, object]]:
-    """A graph node value is either ``None`` (leaf) or a mapping of children."""
-    if isinstance(children, dict):
-        return list(children.items())
-    return []
 
 
 def _index_instances(

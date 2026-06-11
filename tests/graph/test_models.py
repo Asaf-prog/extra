@@ -6,20 +6,13 @@ import dataclasses
 
 import pytest
 
-from agentplatform.graph import CompiledAgentGraph, GraphInstance, NodeDeclaration
+from agentplatform.graph import AgentDeclaration, CompiledAgentGraph, GraphInstance
 
 
-def _leaf_declaration() -> NodeDeclaration:
-    return NodeDeclaration(
+def _leaf_declaration() -> AgentDeclaration:
+    return AgentDeclaration(
         node_id="super_agent",
-        node_type="agent",
         description="Handle supermarket orders.",
-        model=None,
-        prompts=None,
-        resolvers=(),
-        tools=(),
-        mcps=(),
-        protected=False,
     )
 
 
@@ -28,7 +21,6 @@ def test_models_carry_their_data() -> None:
     instance = GraphInstance(
         instance_id="main_router/super_agent",
         node_id="super_agent",
-        node_type="agent",
         parent_instance_id="main_router",
         path="main_router/super_agent",
         declaration=declaration,
@@ -49,7 +41,6 @@ def test_instances_are_immutable() -> None:
     instance = GraphInstance(
         instance_id="i1",
         node_id="super_agent",
-        node_type="agent",
         parent_instance_id=None,
         path="super_agent",
         declaration=_leaf_declaration(),

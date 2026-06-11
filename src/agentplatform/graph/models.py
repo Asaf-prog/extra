@@ -5,11 +5,16 @@ runtime is allowed to touch — never raw YAML (see ADR 0002).
 
 Two distinct concepts (see ADR 0006):
 
-- ``NodeDeclaration`` — *what a node is*. One per id under ``orchestrators`` or
-  ``agents``. Reusable and shared.
+- ``NodeDeclaration`` — *what a node is*. Base dataclass with all common
+  fields.  Concrete subtypes are ``OrchestratorDeclaration`` and
+  ``AgentDeclaration``.
 - ``GraphInstance`` — *one occurrence of a node inside the* ``graph`` *tree*.
-  Distinct per occurrence, with a stable ``instance_id`` and a pointer back to
-  its shared ``NodeDeclaration``.
+  Distinct per occurrence, with a stable ``instance_id`` and a pointer back
+  to its shared ``NodeDeclaration``.
+
+The graph layer is fully decoupled from the spec layer — no spec types appear
+here.  All spec fields are flattened or projected into graph-native types by
+the compiler.
 
 All models are frozen (immutable) and use tuples rather than lists so the
 compiled graph cannot be mutated at runtime.
@@ -19,80 +24,96 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
-
-from agentplatform.spec.models import McpSpec, ModelSpec, PromptSpec, ToolSpec
-
-NodeType = Literal["orchestrator", "agent"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ResolvedResolver:
-    """A resolved resolver id.
-
-    Resolvers are declared as a plain list of ids in the YAML (no further
-    config); the runtime discovers the implementation from
-    ``plugins/resolvers/{id}.py`` at build time.
-    """
+    """A resolver reference resolved to its id."""
 
     id: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ResolvedTool:
-    """A tool reference resolved to its declaration."""
+    """A tool reference with its resolved description."""
 
     id: str
-    spec: ToolSpec
+    description: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ResolvedMcp:
-    """An MCP-server reference resolved to its declaration."""
+    """An MCP-server reference with its resolved endpoint URL."""
 
     id: str
-    spec: McpSpec
+    url: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class NodeDeclaration:
-    """What a node *is* — a reusable, resolved declaration.
+    """Common fields shared by all compiled node types.
 
-    References (``resolvers``/``tools``/``mcps``) are resolved to direct typed
-    links. ``model`` already has defaults applied (``None`` only if neither a
-    default nor an override was provided).
+    Model config and prompt paths are stored flat — no nested spec objects.
+    Subclass with :class:`OrchestratorDeclaration` or :class:`AgentDeclaration`;
+    do not instantiate this class directly.
     """
 
     node_id: str
-    node_type: NodeType
     description: str
-    model: ModelSpec | None
-    prompts: PromptSpec | None
-    resolvers: tuple[ResolvedResolver, ...]
-    tools: tuple[ResolvedTool, ...]
-    mcps: tuple[ResolvedMcp, ...]
-    protected: bool
+
+    # Flat model config — all None when no model is configured.
+    model_provider: str | None = None
+    model_name: str | None = None
+    model_temperature: float | None = None
+
+    # Prompt file paths — common to all node types.
+    system_prompt: str | None = None
+    user_prompt: str | None = None
+
+    resolvers: tuple[ResolvedResolver, ...] = ()
+    protected: bool = False
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
+class OrchestratorDeclaration(NodeDeclaration):
+    """Compiled declaration for an orchestrator node.
+
+    Orchestrators route messages to child nodes.  The ``orchestrator_prompt``
+    path points to the instructions used by the routing LLM.
+    """
+
+    orchestrator_prompt: str | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class AgentDeclaration(NodeDeclaration):
+    """Compiled declaration for a leaf agent node.
+
+    Agents call an LLM (optionally with tools) and produce an answer.
+    """
+
+    tools: tuple[ResolvedTool, ...] = ()
+    mcps: tuple[ResolvedMcp, ...] = ()
+
+
+@dataclass(frozen=True, kw_only=True)
 class GraphInstance:
     """One occurrence of a node inside the ``graph`` tree.
 
-    ``instance_id`` is stable and unique per occurrence (so a node id reused in
-    two graph locations yields two distinct instances). ``declaration`` is the
-    shared ``NodeDeclaration`` this occurrence points back to.
+    ``instance_id`` is stable and unique per occurrence (so a node id reused
+    in two graph locations yields two distinct instances).  ``declaration`` is
+    the shared ``NodeDeclaration`` this occurrence points back to.
     """
 
     instance_id: str
     node_id: str
-    node_type: NodeType
     parent_instance_id: str | None
     path: str
     declaration: NodeDeclaration
     children: tuple[GraphInstance, ...]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class CompiledAgentGraph:
     """The fully compiled, immutable agent graph the runtime consumes."""
 
