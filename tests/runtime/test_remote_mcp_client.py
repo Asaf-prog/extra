@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 import pytest
@@ -22,15 +23,19 @@ class FakeTransportContext:
         self.streams = streams
         self.entered = False
         self.closed = False
+        self.enter_task: object | None = None
+        self.exit_task: object | None = None
 
     async def __aenter__(self) -> object:
         if self.fail_enter:
             raise RuntimeError("transport failed")
         self.entered = True
+        self.enter_task = asyncio.current_task()
         return self.streams
 
     async def __aexit__(self, *exc_info: object) -> None:
         self.closed = True
+        self.exit_task = asyncio.current_task()
 
 
 class FakeSessionContext:
@@ -205,6 +210,8 @@ async def test_close_closes_underlying_session_and_transport() -> None:
 
     assert session_context.closed is True
     assert transport.closed is True
+    assert transport.enter_task is not None
+    assert transport.enter_task is transport.exit_task
 
 
 async def test_connection_failure_produces_clear_error() -> None:

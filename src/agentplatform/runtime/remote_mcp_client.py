@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import AsyncExitStack, suppress
+from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol
 from urllib.parse import urlparse
 
@@ -18,6 +20,14 @@ class AsyncContextManagerFactory(Protocol):
 
 class SessionFactory(Protocol):
     def __call__(self, read_stream: Any, write_stream: Any) -> Any: ...
+
+
+@dataclass
+class _ClientCommand:
+    kind: str
+    future: asyncio.Future[object]
+    tool_name: str | None = None
+    arguments: dict[str, object] | None = None
 
 
 class GenericRemoteMCPClient(MCPClientProtocol):
@@ -44,95 +54,189 @@ class GenericRemoteMCPClient(MCPClientProtocol):
         self.transport = _normalize_transport(server_id, transport)
         self._transport_factory = transport_factory or _streamable_http_transport
         self._session_factory = session_factory or _client_session
-        self._exit_stack: AsyncExitStack | None = None
-        self._session: Any | None = None
+        self._commands: asyncio.Queue[_ClientCommand] | None = None
+        self._session_task: asyncio.Task[None] | None = None
 
     async def connect(self) -> None:
-        if self._session is not None:
+        if self._session_task is not None:
             return
 
-        stack = AsyncExitStack()
+        commands: asyncio.Queue[_ClientCommand] = asyncio.Queue()
+        ready: asyncio.Future[object] = asyncio.get_running_loop().create_future()
+        task = asyncio.create_task(self._run_session(commands, ready))
+        self._commands = commands
+        self._session_task = task
+
         try:
-            try:
-                streams = await stack.enter_async_context(self._transport_factory(self.url))
-            except Exception as exc:
-                raise RemoteMCPClientError(
-                    f"MCP server '{self.server_id}' failed to connect to '{self.url}': {exc}"
-                ) from exc
-
-            read_stream, write_stream = _extract_transport_streams(self.server_id, streams)
-            session = await stack.enter_async_context(
-                self._session_factory(read_stream, write_stream)
-            )
-
-            try:
-                await session.initialize()
-            except Exception as exc:
-                raise RemoteMCPClientError(
-                    f"MCP server '{self.server_id}' failed to initialize MCP session: {exc}"
-                ) from exc
-
-            self._exit_stack = stack
-            self._session = session
+            await ready
         except Exception:
-            await _close_stack_quietly(stack)
+            await self._cancel_session_task()
             raise
 
     async def close(self) -> None:
-        stack = self._exit_stack
-        self._exit_stack = None
-        self._session = None
+        task = self._session_task
+        commands = self._commands
 
-        if stack is None:
+        if task is None or commands is None:
             return
 
-        try:
-            await stack.aclose()
-        except Exception as exc:
-            raise RemoteMCPClientError(
-                f"MCP server '{self.server_id}' failed to close MCP session: {exc}"
-            ) from exc
+        future: asyncio.Future[object] = asyncio.get_running_loop().create_future()
+        await commands.put(_ClientCommand(kind="close", future=future))
+        await future
+        await task
+        self._session_task = None
+        self._commands = None
 
     async def list_tools(self) -> list[MCPToolDefinition]:
-        session = self._require_session()
-
-        try:
-            result = await session.list_tools()
-        except Exception as exc:
-            raise RemoteMCPClientError(
-                f"MCP server '{self.server_id}' failed to discover tools: {exc}"
-            ) from exc
-
-        tools = getattr(result, "tools", None)
-        if not isinstance(tools, list):
+        result = await self._send_command("list_tools")
+        if not isinstance(result, list):
             raise RemoteMCPClientError(
                 f"MCP server '{self.server_id}' returned invalid tools/list response."
             )
-
-        return [_tool_definition_from_sdk_tool(self.server_id, tool) for tool in tools]
+        return result
 
     async def call_tool(
         self,
         name: str,
         arguments: dict[str, object],
     ) -> object:
-        session = self._require_session()
+        return await self._send_command("call_tool", tool_name=name, arguments=arguments)
 
+    async def _run_session(
+        self,
+        commands: asyncio.Queue[_ClientCommand],
+        ready: asyncio.Future[object],
+    ) -> None:
+        close_future: asyncio.Future[object] | None = None
         try:
-            result = await session.call_tool(name, arguments)
+            async with AsyncExitStack() as stack:
+                try:
+                    streams = await stack.enter_async_context(self._transport_factory(self.url))
+                except Exception as exc:
+                    raise RemoteMCPClientError(
+                        f"MCP server '{self.server_id}' failed to connect to '{self.url}': {exc}"
+                    ) from exc
+
+                read_stream, write_stream = _extract_transport_streams(self.server_id, streams)
+                session = await stack.enter_async_context(
+                    self._session_factory(read_stream, write_stream)
+                )
+
+                try:
+                    await session.initialize()
+                except Exception as exc:
+                    raise RemoteMCPClientError(
+                        f"MCP server '{self.server_id}' failed to initialize MCP session: {exc}"
+                    ) from exc
+
+                ready.set_result(None)
+
+                while True:
+                    command = await commands.get()
+                    if command.kind == "close":
+                        close_future = command.future
+                        break
+                    await self._handle_command(session, command)
         except Exception as exc:
+            error = (
+                exc
+                if isinstance(exc, RemoteMCPClientError)
+                else RemoteMCPClientError(f"MCP server '{self.server_id}' session failed: {exc}")
+            )
+            if not ready.done():
+                ready.set_exception(error)
+            if close_future is not None and not close_future.done():
+                close_future.set_exception(error)
+            raise error from exc
+        else:
+            if close_future is not None and not close_future.done():
+                close_future.set_result(None)
+
+    async def _handle_command(self, session: Any, command: _ClientCommand) -> None:
+        try:
+            if command.kind == "list_tools":
+                result = await session.list_tools()
+                tools = getattr(result, "tools", None)
+                if not isinstance(tools, list):
+                    raise RemoteMCPClientError(
+                        f"MCP server '{self.server_id}' returned invalid tools/list response."
+                    )
+                command.future.set_result(
+                    [_tool_definition_from_sdk_tool(self.server_id, tool) for tool in tools]
+                )
+                return
+
+            if command.kind == "call_tool":
+                if command.tool_name is None or command.arguments is None:
+                    raise RemoteMCPClientError(
+                        f"MCP server '{self.server_id}' received invalid tool command."
+                    )
+                result = await session.call_tool(command.tool_name, command.arguments)
+                command.future.set_result(
+                    _normalize_call_tool_result(self.server_id, command.tool_name, result)
+                )
+                return
+
             raise RemoteMCPClientError(
-                f"MCP tool '{name}' on server '{self.server_id}' failed: {exc}"
-            ) from exc
+                f"MCP server '{self.server_id}' received unknown client command '{command.kind}'."
+            )
+        except Exception as exc:
+            if command.future.done():
+                return
+            if isinstance(exc, RemoteMCPClientError):
+                command.future.set_exception(exc)
+            elif command.kind == "list_tools":
+                command.future.set_exception(
+                    RemoteMCPClientError(
+                        f"MCP server '{self.server_id}' failed to discover tools: {exc}"
+                    )
+                )
+            elif command.kind == "call_tool":
+                command.future.set_exception(
+                    RemoteMCPClientError(
+                        f"MCP tool '{command.tool_name}' on server '{self.server_id}' failed: {exc}"
+                    )
+                )
+            else:
+                command.future.set_exception(exc)
 
-        return _normalize_call_tool_result(self.server_id, name, result)
-
-    def _require_session(self) -> Any:
-        if self._session is None:
+    async def _send_command(
+        self,
+        kind: str,
+        *,
+        tool_name: str | None = None,
+        arguments: dict[str, object] | None = None,
+    ) -> object:
+        commands = self._commands
+        task = self._session_task
+        if commands is None or task is None:
             raise RemoteMCPClientError(
                 f"MCP server '{self.server_id}' client used before connect()."
             )
-        return self._session
+
+        if task.done():
+            raise RemoteMCPClientError(f"MCP server '{self.server_id}' session is not running.")
+
+        future: asyncio.Future[object] = asyncio.get_running_loop().create_future()
+        await commands.put(
+            _ClientCommand(
+                kind=kind,
+                future=future,
+                tool_name=tool_name,
+                arguments=arguments,
+            )
+        )
+        return await future
+
+    async def _cancel_session_task(self) -> None:
+        task = self._session_task
+        self._session_task = None
+        self._commands = None
+        if task is None:
+            return
+        task.cancel()
+        with suppress(asyncio.CancelledError, RemoteMCPClientError):
+            await task
 
 
 def _validate_url(server_id: str, url: str) -> str:
@@ -265,8 +369,3 @@ def _json_value(value: object) -> object:
     if hasattr(value, "model_dump"):
         return value.model_dump(by_alias=True, mode="json")
     return value
-
-
-async def _close_stack_quietly(stack: AsyncExitStack) -> None:
-    with suppress(Exception):
-        await stack.aclose()

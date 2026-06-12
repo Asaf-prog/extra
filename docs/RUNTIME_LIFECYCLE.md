@@ -33,6 +33,11 @@ configured MCP server, initialize the sessions, and cache discovered tool
 metadata. `Engine.stop()` closes those clients. `Engine.run()` does not
 implicitly start MCP clients.
 
+MCP transports may keep async resources such as AnyIO task groups open between
+startup and shutdown. The engine therefore keeps MCP start, tool calls, and stop
+on the same long-lived async loop instead of opening clients with one
+`asyncio.run(...)` call and closing them with another.
+
 ### Per request (many)
 
 ```

@@ -9,14 +9,18 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import threading
+from collections.abc import Coroutine
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from agentplatform.compiler import compile_spec
 from agentplatform.runtime.langgraph_builder import build_langgraph
 from agentplatform.runtime.mcp_manager import MCPClientFactory, MCPManager
 from agentplatform.runtime.tool_registry import LocalToolProvider, MCPToolProvider, ToolRegistry
 from agentplatform.spec.loader import LoadedSpec
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -50,6 +54,7 @@ class Engine:
             loaded.spec.mcps,
             client_factory=mcp_client_factory,
         )
+        self._mcp_loop: _EngineAsyncLoop | None = None
 
         self._tool_registry = ToolRegistry(
             providers=[
@@ -88,14 +93,34 @@ class Engine:
     def start(self) -> None:
         """Start long-lived runtime infrastructure.
 
-        Currently, this starts MCP clients. This is intentionally separate from
-        ``run`` so the CLI can keep running without a real MCP client.
+        Currently, this starts MCP clients. MCP SDK transports keep async
+        resources open, so start/stop and later MCP tool calls must use the same
+        event loop.
         """
-        asyncio.run(self._mcp_manager.start())
+        if self._mcp_loop is not None:
+            return
+
+        loop = _EngineAsyncLoop()
+        try:
+            loop.run(self._mcp_manager.start())
+        except Exception:
+            loop.close()
+            raise
+
+        self._mcp_loop = loop
 
     def stop(self) -> None:
         """Stop long-lived runtime infrastructure."""
-        asyncio.run(self._mcp_manager.stop())
+        loop = self._mcp_loop
+        self._mcp_loop = None
+
+        if loop is None:
+            return
+
+        try:
+            loop.run(self._mcp_manager.stop())
+        finally:
+            loop.close()
 
     def run(self, message: str) -> RunResult:
         """Invoke the agent system with *message* and return the result."""
@@ -107,3 +132,29 @@ class Engine:
             visited=result.get("visited", []),
             answer=result.get("answer", ""),
         )
+
+
+class _EngineAsyncLoop:
+    """Run long-lived async runtime resources on one dedicated event loop."""
+
+    def __init__(self) -> None:
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(
+            target=self._run_forever,
+            name="agentplatform-engine-async-loop",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def run(self, coro: Coroutine[Any, Any, T]) -> T:
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result()
+
+    def close(self) -> None:
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join()
+        self._loop.close()
+
+    def _run_forever(self) -> None:
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()

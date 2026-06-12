@@ -31,12 +31,20 @@ class FakeMCPClient:
     def __init__(self) -> None:
         self.connected = False
         self.closed = False
+        self.connect_thread_id: int | None = None
+        self.close_thread_id: int | None = None
 
     async def connect(self) -> None:
+        import threading
+
         self.connected = True
+        self.connect_thread_id = threading.get_ident()
 
     async def close(self) -> None:
+        import threading
+
         self.closed = True
+        self.close_thread_id = threading.get_ident()
 
     async def list_tools(self) -> list[MCPToolDefinition]:
         return []
@@ -114,6 +122,17 @@ def test_engine_stop_stops_mcp_manager(monkeypatch: Any) -> None:
 
     assert clients["flights_mcp"].closed is True
     assert clients["super_mcp"].closed is True
+
+
+def test_engine_start_and_stop_use_same_async_thread(monkeypatch: Any) -> None:
+    clients = _fake_clients()
+    engine = _engine(monkeypatch, clients)
+
+    engine.start()
+    engine.stop()
+
+    assert clients["flights_mcp"].connect_thread_id is not None
+    assert clients["flights_mcp"].connect_thread_id == clients["flights_mcp"].close_thread_id
 
 
 def test_execution_context_does_not_contain_mcp_connections() -> None:

@@ -148,3 +148,59 @@ For the MVP:
 
 Future per-tool access control should be added deliberately to the schema and
 docs before implementation.
+
+---
+
+## Manual Smoke Test: DeepWiki Remote MCP
+
+`examples/deepwiki_mcp_agents.yml` is a richer manual smoke-test configuration
+for a real public remote MCP server. It demonstrates the intended user
+experience for remote MCP: declare a server URL, grant an agent access with
+`agent.mcps`, and let the platform create the generic MCP client automatically.
+
+DeepWiki is used only as a public remote MCP example for validating runtime
+integration. It is not part of `make check`, and automated tests do not call the
+real service.
+
+The MCP declaration is URL-only:
+
+```yaml
+mcps:
+  deepwiki:
+    url: "https://mcp.deepwiki.com/mcp"
+```
+
+The `deepwiki_agent` declares `mcps: [deepwiki]`, so its model may call tools
+discovered from the DeepWiki MCP server. There is no stdio configuration,
+command/args, authentication, custom client code, or DeepWiki-specific client
+class. The generic URL-based MCP client handles connection and discovery during
+`Engine.start()`.
+
+Validate the example offline, without contacting DeepWiki:
+
+```bash
+poetry run python -m agentplatform.cli.main validate examples/deepwiki_mcp_agents.yml
+```
+
+Run the manual smoke test when provider dependencies and credentials are
+available:
+
+```bash
+poetry run python -m agentplatform.cli.main run examples/deepwiki_mcp_agents.yml "Use DeepWiki to ask what the public GitHub repository modelcontextprotocol/python-sdk is about"
+```
+
+Additional useful prompts:
+
+```bash
+poetry run python -m agentplatform.cli.main run examples/deepwiki_mcp_agents.yml "Use DeepWiki to inspect the wiki structure for modelcontextprotocol/python-sdk."
+
+poetry run python -m agentplatform.cli.main run examples/deepwiki_mcp_agents.yml "Use DeepWiki to explain the main modules in langchain-ai/langchain."
+
+poetry run python -m agentplatform.cli.main run examples/deepwiki_mcp_agents.yml "Use DeepWiki to find where tool calling is implemented in modelcontextprotocol/python-sdk."
+```
+
+The current sample model uses Anthropic via LangChain, so install the optional
+provider dependency (for example `langchain-anthropic`) and configure the
+required provider credentials before running. This DeepWiki call is a manual
+integration smoke test, not a unit test or CI requirement; automated tests stay
+offline and deterministic.

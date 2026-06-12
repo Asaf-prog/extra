@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable
+from concurrent.futures import Future
 from typing import Protocol, runtime_checkable
 
 from agentplatform.runtime.context import ExecutionContext
@@ -52,8 +54,11 @@ class MCPManager:
         self._client_factory = client_factory or _default_client_factory
         self._clients: dict[str, MCPClientProtocol] = {}
         self._tools_by_server: dict[str, list[MCPToolDefinition]] = {}
+        self._owner_loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self) -> None:
+        self._owner_loop = asyncio.get_running_loop()
+
         for server_id, config in self._mcp_configs.items():
             client = self._client_factory(server_id, config)
 
@@ -79,6 +84,7 @@ class MCPManager:
 
         self._clients.clear()
         self._tools_by_server.clear()
+        self._owner_loop = None
 
         if errors:
             raise MCPManagerError("Failed to close MCP clients: " + "; ".join(errors))
@@ -90,6 +96,36 @@ class MCPManager:
         return list(self._tools_by_server.get(server_id, []))
 
     async def call_tool(
+        self,
+        *,
+        server_id: str,
+        tool_name: str,
+        arguments: dict[str, object],
+        ctx: ExecutionContext,
+    ) -> object:
+        owner_loop = self._owner_loop
+        running_loop = asyncio.get_running_loop()
+
+        if owner_loop is not None and owner_loop is not running_loop:
+            future: Future[object] = asyncio.run_coroutine_threadsafe(
+                self._call_tool_on_owner_loop(
+                    server_id=server_id,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    ctx=ctx,
+                ),
+                owner_loop,
+            )
+            return await asyncio.wrap_future(future)
+
+        return await self._call_tool_on_owner_loop(
+            server_id=server_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            ctx=ctx,
+        )
+
+    async def _call_tool_on_owner_loop(
         self,
         *,
         server_id: str,

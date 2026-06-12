@@ -21,6 +21,14 @@ def test_validate_command_succeeds_for_example() -> None:
     assert "agents.yml" in result.output
 
 
+def test_validate_command_succeeds_for_deepwiki_mcp_example() -> None:
+    result = runner.invoke(app, ["validate", "examples/deepwiki_mcp_agents.yml"])
+
+    assert result.exit_code == 0
+    assert "Semantic validation passed" in result.output
+    assert "deepwiki_mcp_agents.yml" in result.output
+
+
 def test_validate_command_exits_nonzero_for_invalid_config(tmp_path: Path) -> None:
     config = tmp_path / "agent.yml"
     config.write_text(yaml.safe_dump({"graph": {"root": None}}), encoding="utf-8")

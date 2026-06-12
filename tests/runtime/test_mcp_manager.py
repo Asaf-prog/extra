@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
+
 import pytest
 
 from agentplatform.runtime.context import ExecutionContext
@@ -26,11 +29,14 @@ class FakeMCPClient:
         self.fail_list_tools = fail_list_tools
         self.fail_call_tool = fail_call_tool
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.connect_thread_id: int | None = None
+        self.call_thread_id: int | None = None
 
     async def connect(self) -> None:
         if self.fail_connect:
             raise RuntimeError("connect failed")
         self.connected = True
+        self.connect_thread_id = threading.get_ident()
 
     async def close(self) -> None:
         self.closed = True
@@ -44,6 +50,7 @@ class FakeMCPClient:
         if self.fail_call_tool:
             raise RuntimeError("tool failed")
         self.calls.append((name, arguments))
+        self.call_thread_id = threading.get_ident()
         return {"tool": name, "arguments": arguments}
 
 
@@ -130,6 +137,45 @@ async def test_call_tool_succeeds_for_known_server_and_tool() -> None:
 
     assert result == {"tool": "flights_search", "arguments": arguments}
     assert client.calls == [("flights_search", arguments)]
+
+
+def test_call_tool_from_another_event_loop_runs_client_on_owner_loop() -> None:
+    client = FakeMCPClient([_tool("flights_mcp", "flights_search")])
+    manager = _manager({"flights_mcp": client})
+    ctx = ExecutionContext(message="hello", state={})
+    ready = threading.Event()
+    stopped = threading.Event()
+
+    async def start_and_wait() -> None:
+        await manager.start()
+        ready.set()
+        while not stopped.is_set():
+            await asyncio.sleep(0.01)
+        await manager.stop()
+
+    def run_owner_loop() -> None:
+        asyncio.run(start_and_wait())
+
+    thread = threading.Thread(target=run_owner_loop)
+    thread.start()
+    ready.wait(timeout=5)
+
+    try:
+        result = asyncio.run(
+            manager.call_tool(
+                server_id="flights_mcp",
+                tool_name="flights_search",
+                arguments={},
+                ctx=ctx,
+            )
+        )
+    finally:
+        stopped.set()
+        thread.join(timeout=5)
+
+    assert result == {"tool": "flights_search", "arguments": {}}
+    assert client.connect_thread_id is not None
+    assert client.call_thread_id == client.connect_thread_id
 
 
 async def test_call_tool_for_unknown_server_fails_clearly() -> None:
