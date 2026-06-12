@@ -87,10 +87,44 @@ def plugin_base_dir(tmp_path: Path) -> Path:
     for tool_id in ("book_flight", "add_to_cart"):
         (tools_dir / f"{tool_id}.py").write_text(f"def {tool_id}(**kwargs): return 'ok'\n")
 
-    for resolver_id in ("current_date", "user_name", "subscription"):
-        (resolvers_dir / f"{resolver_id}.py").write_text(
-            f"def {resolver_id}(): return '{resolver_id}-value'\n"
-        )
+    (resolvers_dir / "__init__.py").write_text('"""Resolvers."""\n')
+    (resolvers_dir / "base.py").write_text(
+        "from agentplatform.runtime import ExecutionContext\n\n"
+        "class BaseResolver:\n"
+        "    def current_date(self, ctx: ExecutionContext) -> str:\n"
+        "        return 'current_date-value'\n"
+        "    def user_name(self, ctx: ExecutionContext) -> str:\n"
+        "        return 'user_name-value'\n"
+    )
+    (resolvers_dir / "domestic_flights_agent.py").write_text(
+        "from agentplatform.runtime import ExecutionContext\n"
+        "from plugins.resolvers.base import BaseResolver\n\n"
+        "class DomesticFlightsAgentResolver(BaseResolver):\n"
+        "    pass\n"
+    )
+    (resolvers_dir / "international_flights_agent.py").write_text(
+        "from agentplatform.runtime import ExecutionContext\n"
+        "from plugins.resolvers.base import BaseResolver\n\n"
+        "class InternationalFlightsAgentResolver(BaseResolver):\n"
+        "    pass\n"
+    )
+    (resolvers_dir / "super_agent.py").write_text(
+        "from agentplatform.runtime import ExecutionContext\n"
+        "from plugins.resolvers.base import BaseResolver\n\n"
+        "class SuperAgentResolver(BaseResolver):\n"
+        "    def subscription(self, ctx: ExecutionContext) -> str:\n"
+        "        return 'subscription-value'\n"
+    )
+    (resolvers_dir / "resolvers.toml").write_text(
+        '[resolvers]\nbase_class = "plugins.resolvers.base.BaseResolver"\n'
+        "[resolvers.agents.domestic_flights_agent]\n"
+        'class = "plugins.resolvers.domestic_flights_agent.DomesticFlightsAgentResolver"\n'
+        "[resolvers.agents.international_flights_agent]\n"
+        'class = "plugins.resolvers.international_flights_agent.'
+        'InternationalFlightsAgentResolver"\n'
+        "[resolvers.agents.super_agent]\n"
+        'class = "plugins.resolvers.super_agent.SuperAgentResolver"\n'
+    )
 
     return tmp_path
 

@@ -53,6 +53,7 @@ from agentplatform.graph.models import (
     OrchestratorDeclaration,
 )
 from agentplatform.models import build_chat_model
+from agentplatform.runtime.context import ExecutionContext
 from agentplatform.runtime.plugin_loader import PluginLoader
 from agentplatform.runtime.state import GraphState
 
@@ -163,11 +164,14 @@ def _make_agent_node(
 
     def node(state: GraphState) -> dict[str, object]:
         # Resolve context variables (called once per request, before LLM).
+        ctx = ExecutionContext(message=state.get("message", ""), state=dict(state))
         context: dict[str, str] = {}
         if loader is not None:
             for resolved_resolver in declaration.resolvers:
-                fn = loader.load_resolver(resolved_resolver.id)
-                context[resolved_resolver.id] = str(fn())
+                fn = loader.load_resolver(declaration.node_id, resolved_resolver.id)
+                value = fn(ctx)
+                ctx.resolved_context[resolved_resolver.id] = value
+                context[resolved_resolver.id] = str(value)
 
         system_prompt = _load_system_prompt(declaration, context, base_dir)
         messages: list = [
