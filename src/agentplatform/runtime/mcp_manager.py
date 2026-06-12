@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from agentplatform.runtime.context import ExecutionContext
 from agentplatform.runtime.tool_models import MCPToolDefinition
@@ -13,6 +13,7 @@ class MCPManagerError(RuntimeError):
     """Raised when MCP manager operations fail."""
 
 
+@runtime_checkable
 class MCPClientProtocol(Protocol):
     async def connect(self) -> None: ...
 
@@ -31,9 +32,11 @@ MCPClientFactory = Callable[[str, McpSpec], MCPClientProtocol]
 
 
 def _default_client_factory(server_id: str, config: McpSpec) -> MCPClientProtocol:
-    raise MCPManagerError(
-        f"Real MCP client is not implemented yet for MCP server '{server_id}'. "
-        "Inject an MCPClientFactory for tests or implement the remote MCP client in a later phase."
+    from agentplatform.runtime.remote_mcp_client import GenericRemoteMCPClient
+
+    return GenericRemoteMCPClient(
+        server_id=server_id,
+        url=config.url,
     )
 
 
