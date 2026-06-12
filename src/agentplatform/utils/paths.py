@@ -21,6 +21,9 @@ from pathlib import Path
 _PLUGINS = "plugins"
 _TOOLS = "tools"
 _RESOLVERS = "resolvers"
+_RESOLVER_CONFIG = "resolvers.toml"
+_RESOLVER_INIT = "__init__.py"
+_RESOLVER_BASE = "base.py"
 _ACCESS = "access.py"
 
 
@@ -57,9 +60,24 @@ class ProjectPaths:
         """``<base_dir>/plugins/tools/{tool_id}.py``"""
         return self.tools_dir / f"{tool_id}.py"
 
-    def resolver(self, resolver_id: str) -> Path:
-        """``<base_dir>/plugins/resolvers/{resolver_id}.py``"""
-        return self.resolvers_dir / f"{resolver_id}.py"
+    @property
+    def resolver_config(self) -> Path:
+        """``<base_dir>/plugins/resolvers/resolvers.toml``"""
+        return self.resolvers_dir / _RESOLVER_CONFIG
+
+    @property
+    def resolver_init(self) -> Path:
+        """``<base_dir>/plugins/resolvers/__init__.py``"""
+        return self.resolvers_dir / _RESOLVER_INIT
+
+    @property
+    def resolver_base(self) -> Path:
+        """``<base_dir>/plugins/resolvers/base.py``"""
+        return self.resolvers_dir / _RESOLVER_BASE
+
+    def resolver_agent(self, agent_id: str) -> Path:
+        """``<base_dir>/plugins/resolvers/{agent_id}.py``"""
+        return self.resolvers_dir / f"{agent_id}.py"
 
     @property
     def access_plugin(self) -> Path:
@@ -76,6 +94,21 @@ class ProjectPaths:
         return f"{_PLUGINS}/{_TOOLS}/{tool_id}.py"
 
     @staticmethod
-    def resolver_rel(resolver_id: str) -> str:
-        """``plugins/resolvers/{resolver_id}.py`` — for CLI output and error messages."""
-        return f"{_PLUGINS}/{_RESOLVERS}/{resolver_id}.py"
+    def resolver_config_rel() -> str:
+        """``plugins/resolvers/resolvers.toml`` — for CLI output and errors."""
+        return f"{_PLUGINS}/{_RESOLVERS}/{_RESOLVER_CONFIG}"
+
+    @staticmethod
+    def resolver_init_rel() -> str:
+        """``plugins/resolvers/__init__.py`` — for CLI output and errors."""
+        return f"{_PLUGINS}/{_RESOLVERS}/{_RESOLVER_INIT}"
+
+    @staticmethod
+    def resolver_base_rel() -> str:
+        """``plugins/resolvers/base.py`` — for CLI output and errors."""
+        return f"{_PLUGINS}/{_RESOLVERS}/{_RESOLVER_BASE}"
+
+    @staticmethod
+    def resolver_agent_rel(agent_id: str) -> str:
+        """``plugins/resolvers/{agent_id}.py`` — for CLI output and errors."""
+        return f"{_PLUGINS}/{_RESOLVERS}/{agent_id}.py"

@@ -41,9 +41,9 @@ def version() -> None:
 def generate(path: str) -> None:
     """Generate plugin stubs for tools and resolvers declared in the YAML.
 
-    Creates ``plugins/tools/{id}.py`` and ``plugins/resolvers/{id}.py`` next to
-    the YAML file. Existing files are never overwritten — only missing stubs are
-    added. Run once after adding a new tool or resolver to the YAML.
+    Creates ``plugins/tools/{id}.py`` plus the resolver class/config files next
+    to the YAML file. Existing files are never overwritten — only missing stubs
+    are added. Run once after adding a new tool or resolver to the YAML.
     """
     try:
         loaded = load_spec(path)
@@ -56,9 +56,14 @@ def generate(path: str) -> None:
 
     for rel in result.created:
         typer.echo(f"  create  {rel}")
+    for rel in result.updated:
+        typer.echo(f"  update  {rel}")
+    for rel in result.stale:
+        typer.echo(f"  stale   {rel}")
 
-    if result.created:
-        typer.echo(f"\n✓ Generated {len(result.created)} stub(s). Fill in the function bodies.")
+    changed = len(result.created) + len(result.updated)
+    if changed:
+        typer.echo(f"\n✓ Generated {changed} stub update(s). Fill in the method bodies.")
 
 
 @app.command()

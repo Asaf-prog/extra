@@ -80,6 +80,7 @@ def _validate_graph(spec: AgentEngineSpec, issues: list[ValidationIssue]) -> Non
 
 
 def _validate_references(spec: AgentEngineSpec, issues: list[ValidationIssue]) -> None:
+    _validate_resolver_definitions(spec, issues)
     resolver_ids = set(spec.resolvers)
     tool_ids = set(spec.tools)
     mcp_ids = set(spec.mcps)
@@ -124,6 +125,23 @@ def _validate_references(spec: AgentEngineSpec, issues: list[ValidationIssue]) -
             owner=f"agent '{agent_id}'",
             issues=issues,
         )
+
+
+def _validate_resolver_definitions(
+    spec: AgentEngineSpec,
+    issues: list[ValidationIssue],
+) -> None:
+    for resolver_id, resolver in spec.resolvers.items():
+        if resolver.scope not in {"agent", "shared"}:
+            issues.append(
+                ValidationIssue(
+                    path=f"$.resolvers.{resolver_id}.scope",
+                    message=(
+                        f"Resolver '{resolver_id}' has invalid scope '{resolver.scope}'; "
+                        "expected 'agent' or 'shared'"
+                    ),
+                )
+            )
 
 
 def _validate_resolver_refs(

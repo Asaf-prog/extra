@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # The graph section is a tree: each key is a node_id, each value is that
 # node's children subtree (another GraphChildren) or None for leaf nodes.
@@ -37,6 +37,11 @@ class McpSpec(StrictSpecModel):
 
 class ToolSpec(StrictSpecModel):
     description: str
+
+
+class ResolverSpec(StrictSpecModel):
+    scope: str = "agent"
+    return_type: str = "str"
 
 
 class PromptSpec(StrictSpecModel):
@@ -78,9 +83,21 @@ class AgentEngineSpec(StrictSpecModel):
     defaults: DefaultsSpec | None = None
     mcps: dict[str, McpSpec] = Field(default_factory=dict)
     tools: dict[str, ToolSpec] = Field(default_factory=dict)
-    resolvers: list[str] = Field(default_factory=list)
+    resolvers: dict[str, ResolverSpec] = Field(default_factory=dict)
     orchestrators: dict[str, OrchestratorSpec] = Field(default_factory=dict)
     agents: dict[str, AgentSpec] = Field(default_factory=dict)
+
+    @field_validator("resolvers", mode="before")
+    @classmethod
+    def _normalize_resolvers(cls, value: object) -> object:
+        if isinstance(value, list):
+            return {resolver_id: {} for resolver_id in value}
+        if isinstance(value, dict):
+            return {
+                resolver_id: ({} if resolver_spec is None else resolver_spec)
+                for resolver_id, resolver_spec in value.items()
+            }
+        return value
 
     def node_ids(self) -> set[str]:
         return set(self.orchestrators) | set(self.agents)

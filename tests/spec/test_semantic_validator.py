@@ -100,6 +100,23 @@ def test_unknown_resolver_reference_fails(tmp_path: Path) -> None:
         load_tmp_config(tmp_path, data)
 
 
+def test_invalid_resolver_scope_fails(tmp_path: Path) -> None:
+    data = minimal_valid_config()
+    data["resolvers"] = {"current_date": {"scope": "global"}}
+
+    with pytest.raises(SpecValidationError, match="invalid scope 'global'"):
+        load_tmp_config(tmp_path, data)
+
+
+def test_scoped_resolver_mapping_loads(tmp_path: Path) -> None:
+    data = minimal_valid_config()
+    data["resolvers"] = {"current_date": {"scope": "shared", "return_type": "str"}}
+
+    loaded = load_tmp_config(tmp_path, data)
+
+    assert loaded.spec.resolvers["current_date"].scope == "shared"
+
+
 def test_unknown_tool_reference_fails(tmp_path: Path) -> None:
     data = minimal_valid_config()
     data["agents"]["worker"]["tools"] = ["missing_tool"]
