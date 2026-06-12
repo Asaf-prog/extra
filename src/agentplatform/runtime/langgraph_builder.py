@@ -12,20 +12,20 @@ Routing
 -------
 ``_make_router`` is the single place that decides which child to go to:
 
-1. If ``base_dir`` was provided and the orchestrator has a model → call the LLM
-   with the orchestrator-prompt + child descriptions, structured output
+1. If ``agents_yml`` was provided and the orchestrator has a model → call the
+   LLM with the orchestrator-prompt + child descriptions, structured output
    ``{"next": "<node_id>"}``.
 2. Fallback → first declared child.
 
-Tests inject a fake ``model_factory`` and pass ``base_dir`` to enable LLM
+Tests inject a fake ``model_factory`` and pass ``agents_yml`` to enable LLM
 routing without hitting the network.
 
 Plugins & prompts
 -----------------
 All plugin loading (tools, resolvers) and prompt-file reading require
-``base_dir`` (the directory that contains ``agents.yml``).  When ``base_dir``
-is ``None``, agents fall back to their ``description`` as the system prompt and
-run without tools or resolver context.
+``agents_yml`` (the path to the agent YAML file).  When omitted, agents fall
+back to their ``description`` as the system prompt and run without tools or
+resolver context.
 
 Per-node models (ADR 0006, ADR 0008)
 -------------------------------------
@@ -70,7 +70,7 @@ class _RouteDecision(BaseModel):
 def build_langgraph(
     graph: CompiledAgentGraph,
     *,
-    base_dir: Path | None = None,
+    agents_yml: Path | None = None,
     model_factory: ModelFactory = build_chat_model,
 ) -> CompiledStateGraph:
     """Build and compile a LangGraph from the compiled agent graph.
@@ -79,8 +79,8 @@ def build_langgraph(
     ----------
     graph:
         The compiled agent graph produced by ``compile_spec``.
-    base_dir:
-        Directory that contains ``agents.yml``.  When provided, enables:
+    agents_yml:
+        Path to the ``agents.yml`` file.  When provided, enables:
         - LLM-based orchestrator routing (using the orchestrator's model).
         - System-prompt loading from ``.md`` files.
         - Tool and resolver loading from ``plugins/``.
@@ -88,11 +88,11 @@ def build_langgraph(
         Builds a ``BaseChatModel`` from ``(provider, name, temperature)``.
         Override in tests.
     """
-    loader = PluginLoader(base_dir) if base_dir is not None else None
+    loader = PluginLoader(agents_yml.parent) if agents_yml is not None else None
     builder = StateGraph(GraphState)
 
     for agent_node in graph.nodes_by_id.values():
-        node = _make_node(agent_node, model_factory, loader, base_dir)
+        node = _make_node(agent_node, model_factory, loader, agents_yml)
         builder.add_node(agent_node.node_path, node)  # type: ignore[call-overload]
 
     builder.add_edge(START, graph.root.node_path)
@@ -105,7 +105,7 @@ def build_langgraph(
                 routes[child.node_path] = child.node_path
             builder.add_conditional_edges(
                 agent_node.node_path,
-                _make_router(agent_node, agent_node.declaration, model_factory, base_dir),
+                _make_router(agent_node, agent_node.declaration, model_factory, agents_yml),
                 routes,
             )
         else:
@@ -123,7 +123,7 @@ def _make_node(
     agent_node: AgentNode,
     model_factory: ModelFactory,
     loader: PluginLoader | None,
-    base_dir: Path | None,
+    agents_yml: Path | None,
 ) -> Callable[[GraphState], dict[str, object]]:
     match agent_node.declaration:
         case OrchestratorDeclaration():
@@ -135,7 +135,7 @@ def _make_node(
             return orchestrator_node
 
         case AgentDeclaration() as decl:
-            return _make_agent_node(agent_node, decl, model_factory, loader, base_dir)
+            return _make_agent_node(agent_node, decl, model_factory, loader, agents_yml)
         case _:
             raise TypeError(f"Unknown declaration type: {type(agent_node.declaration)}")
 
@@ -145,7 +145,7 @@ def _make_agent_node(
     declaration: AgentDeclaration,
     model_factory: ModelFactory,
     loader: PluginLoader | None,
-    base_dir: Path | None,
+    agents_yml: Path | None,
 ) -> Callable[[GraphState], dict[str, object]]:
     """Agent (leaf) node: resolves context, builds prompt, calls model in a loop."""
     node_path = agent_node.node_path
@@ -173,7 +173,7 @@ def _make_agent_node(
                 ctx.resolved_context[resolved_resolver.id] = value
                 context[resolved_resolver.id] = str(value)
 
-        system_prompt = _load_system_prompt(declaration, context, base_dir)
+        system_prompt = _load_system_prompt(declaration, context, agents_yml)
         messages: list = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=state.get("message", "")),
@@ -205,12 +205,12 @@ def _make_router(
     agent_node: AgentNode,
     declaration: OrchestratorDeclaration,
     model_factory: ModelFactory,
-    base_dir: Path | None,
+    agents_yml: Path | None,
 ) -> Callable[[GraphState], str]:
     """Build the routing function for an orchestrator.
 
     Priority:
-    1. ``base_dir`` provided and orchestrator has a model → call LLM with
+    1. ``agents_yml`` provided and orchestrator has a model → call LLM with
        structured output to pick the best child.
     2. First declared child (last-resort fallback).
     """
@@ -221,10 +221,10 @@ def _make_router(
         child_lines.append(f"- {child.node_id}: {child.declaration.description}")
     children_desc = "\n".join(child_lines)
 
-    # Build the LLM routing chain once at graph-build time (only with base_dir).
+    # Build the LLM routing chain once at graph-build time (only with agents_yml).
     routing_chain = None
     if (
-        base_dir is not None
+        agents_yml is not None
         and declaration.model_provider is not None
         and declaration.model_name is not None
     ):
@@ -237,7 +237,7 @@ def _make_router(
     def route(state: GraphState) -> str:
         # 1. LLM routing.
         if routing_chain is not None:
-            orchestrator_prompt = _load_orchestrator_prompt(declaration, base_dir)
+            orchestrator_prompt = _load_orchestrator_prompt(declaration, agents_yml)
             system = (
                 f"{orchestrator_prompt}\n\n"
                 f"Available agents:\n{children_desc}\n\n"
@@ -268,10 +268,13 @@ def _make_router(
 # ---------------------------------------------------------------------------
 
 
-def _load_orchestrator_prompt(declaration: OrchestratorDeclaration, base_dir: Path | None) -> str:
+def _load_orchestrator_prompt(
+    declaration: OrchestratorDeclaration,
+    agents_yml: Path | None,
+) -> str:
     """Load the orchestrator routing instructions from its .md file."""
-    if base_dir is not None and declaration.orchestrator_prompt is not None:
-        path = base_dir / declaration.orchestrator_prompt
+    if agents_yml is not None and declaration.orchestrator_prompt is not None:
+        path = agents_yml.parent / declaration.orchestrator_prompt
         if path.is_file():
             return path.read_text(encoding="utf-8")
     return declaration.description
@@ -280,11 +283,11 @@ def _load_orchestrator_prompt(declaration: OrchestratorDeclaration, base_dir: Pa
 def _load_system_prompt(
     declaration: AgentDeclaration,
     context: dict[str, str],
-    base_dir: Path | None,
+    agents_yml: Path | None,
 ) -> str:
     """Load and render the agent's system prompt, injecting resolver values."""
-    if base_dir is not None and declaration.system_prompt is not None:
-        path = base_dir / declaration.system_prompt
+    if agents_yml is not None and declaration.system_prompt is not None:
+        path = agents_yml.parent / declaration.system_prompt
         if path.is_file():
             raw = path.read_text(encoding="utf-8")
             for key, value in context.items():

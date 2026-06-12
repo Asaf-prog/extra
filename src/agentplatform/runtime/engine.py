@@ -37,7 +37,7 @@ class Engine:
     def __init__(self, loaded: LoadedSpec) -> None:
         graph = compile_spec(loaded.spec)
         self._system_name = graph.system_name
-        self._app = build_langgraph(graph, base_dir=loaded.source_path.parent)
+        self._app = build_langgraph(graph, agents_yml=loaded.source_path)
 
     @property
     def system_name(self) -> str:

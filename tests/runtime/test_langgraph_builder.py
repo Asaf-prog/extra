@@ -155,7 +155,7 @@ def test_llm_routing_to_super_agent(plugin_base_dir: Path) -> None:
     # Provide base_dir so LLM routing is enabled; fake model routes to super_agent.
     factory = RecordingFactory(routing="super_agent")
     graph = compile_spec(load_spec(EXAMPLE).spec)
-    app = build_langgraph(graph, base_dir=plugin_base_dir, model_factory=factory)
+    app = build_langgraph(graph, agents_yml=plugin_base_dir / "agents.yml", model_factory=factory)
 
     result = app.invoke({"message": "I need milk"})
 
@@ -167,7 +167,7 @@ def test_llm_routing_deep_into_flights(plugin_base_dir: Path) -> None:
     # Route main_router → flights_router; flights_router falls back to first child.
     factory = RecordingFactory(routing="flights_router")
     graph = compile_spec(load_spec(EXAMPLE).spec)
-    app = build_langgraph(graph, base_dir=plugin_base_dir, model_factory=factory)
+    app = build_langgraph(graph, agents_yml=plugin_base_dir / "agents.yml", model_factory=factory)
 
     result = app.invoke({"message": "book a flight"})
 
