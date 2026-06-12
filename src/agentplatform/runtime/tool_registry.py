@@ -128,7 +128,7 @@ class LocalToolProvider(ToolProvider):
         raise ToolRegistryError("Local Python tool execution is not implemented yet.")
 
 
-class ToolRegistry(ToolProvider):
+class ToolRegistry:
     """Generic runtime-facing tool registry.
 
     The runtime uses this abstraction instead of calling MCPManager directly.
