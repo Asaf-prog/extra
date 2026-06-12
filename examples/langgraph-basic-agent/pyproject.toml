@@ -7,7 +7,7 @@ name = "langgraph-basic-agent"
 version = "0.1.0"
 description = "A deterministic LangGraph and LangChain reference example."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<4.0"
 dependencies = [
     "langchain>=0.3,<2.0",
     "langgraph>=0.2,<2.0",

@@ -16,7 +16,7 @@ package-mode = false
 name = "agentplatform"
 description = "A declarative platform for building AI agent systems (foundation phase)."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<4.0"
 license = { text = "TBD" }
 authors = [{ name = "The Declarative Agent Platform contributors" }]
 keywords = ["ai", "agents", "llm", "yaml", "declarative", "orchestration", "mcp"]
@@ -49,6 +49,7 @@ dependencies = [
     "langchain-core>=0.3",
     "mcp>=1.27,<2",
     "python-dotenv>=1.0",
+    "langchain-anthropic (>=1.4.5,<2.0.0)",
 ]
 
 [project.optional-dependencies]
