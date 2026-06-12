@@ -1,0 +1,20 @@
+# Resolver plugin configuration.
+# The runtime imports the base class and maps each selected agent id to its
+# customer-owned resolver implementation class.
+[resolvers]
+base_class = "plugins.resolvers.base.BaseResolver"
+
+# Optional customer-owned constructor dependencies. Values are passed to
+# resolver class __init__ methods as keyword arguments. Replace these with
+# organization dependency handles or configuration names as needed.
+[resolvers.dependencies]
+rest_client = "internal_rest_client"
+
+[resolvers.agents.domestic_flights_agent]
+class = "plugins.resolvers.domestic_flights_agent.DomesticFlightsAgentResolver"
+
+[resolvers.agents.international_flights_agent]
+class = "plugins.resolvers.international_flights_agent.InternationalFlightsAgentResolver"
+
+[resolvers.agents.super_agent]
+class = "plugins.resolvers.super_agent.SuperAgentResolver"
