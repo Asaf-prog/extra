@@ -6,6 +6,7 @@ partial update; LangGraph merges it into the running state.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TypedDict
 
 from agentplatform.runtime.tool_models import ToolUsageRecord
@@ -25,3 +26,9 @@ class GraphState(TypedDict, total=False):
 
     used_tools: list[ToolUsageRecord]
     """Runtime-observed tool calls, in call order."""
+
+    answer_stream: Callable[[str], None]
+    """Optional callback for final assistant answer chunks."""
+
+    route_stream: Callable[[tuple[str, ...]], None]
+    """Optional callback for the final route once the selected agent is known."""

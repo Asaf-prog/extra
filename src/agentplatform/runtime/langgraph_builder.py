@@ -38,9 +38,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Hashable
 from pathlib import Path
+from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -256,9 +257,11 @@ def _make_agent_node(
             SystemMessage(content=system_prompt),
             HumanMessage(content=state.get("message", "")),
         ]
+        route = (*state.get("visited", []), node_path)
+        _stream_route(state, route)
 
         # Tool-call loop: run until the model stops requesting tools.
-        response = model.invoke(messages)
+        response = cast(Any, _invoke_model(model, messages, state))
         while getattr(response, "tool_calls", None):
             messages.append(response)
             for tc in response.tool_calls:
@@ -292,10 +295,10 @@ def _make_agent_node(
                     ),
                 )
                 messages.append(ToolMessage(content=str(tool_result), tool_call_id=tc["id"]))
-            response = model.invoke(messages)
+            response = cast(Any, _invoke_model(model, messages, state))
 
         return {
-            "visited": [*state.get("visited", []), node_path],
+            "visited": list(route),
             "answer": _as_text(response.content),
             "allowed_tools": [tool.name for tool in allowed_runtime_tools],
             "used_tools": state.get("used_tools", []),
@@ -429,6 +432,29 @@ def _as_text(content: object) -> str:
                 parts.append(block["text"])
         return "".join(parts)
     return str(content)
+
+
+def _invoke_model(model: Any, messages: list, state: GraphState) -> object:
+    answer_stream = state.get("answer_stream")
+    if not callable(answer_stream):
+        return model.invoke(messages)
+
+    streamed = None
+    for chunk in model.stream(messages):
+        streamed = chunk if streamed is None else streamed + chunk
+        text = _as_text(getattr(chunk, "content", ""))
+        if text:
+            answer_stream(text)
+
+    if streamed is None:
+        return AIMessage(content="")
+    return streamed
+
+
+def _stream_route(state: GraphState, route: tuple[str, ...]) -> None:
+    route_stream = state.get("route_stream")
+    if callable(route_stream):
+        route_stream(route)
 
 
 def _record_tool_usage(state: GraphState, record: ToolUsageRecord) -> None:

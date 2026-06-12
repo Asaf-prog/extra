@@ -11,6 +11,7 @@ from agentplatform.cli import main as cli_main
 from agentplatform.runtime.context import ExecutionContext
 from agentplatform.runtime.engine import Engine, EngineRunError, RunResult
 from agentplatform.runtime.mcp_manager import MCPClientProtocol
+from agentplatform.runtime.streaming import RunStreamEvent
 from agentplatform.runtime.tool_models import MCPToolDefinition, ToolUsageRecord
 from agentplatform.runtime.tool_registry import ToolRegistry
 from agentplatform.spec import load_spec
@@ -180,6 +181,59 @@ def test_engine_run_error_exposes_partial_tool_usage(monkeypatch: Any) -> None:
         raise AssertionError("EngineRunError was not raised")
 
 
+def test_engine_stream_yields_answer_delta_and_final_events(monkeypatch: Any) -> None:
+    class StreamingApp:
+        def invoke(self, state: dict[str, object]) -> dict[str, object]:
+            route_stream = state["route_stream"]
+            answer_stream = state["answer_stream"]
+            assert callable(route_stream)
+            assert callable(answer_stream)
+            route_stream(("main_router", "main_router/super_agent"))
+            answer_stream("hel")
+            answer_stream("lo")
+            return {
+                "visited": ["main_router", "main_router/super_agent"],
+                "answer": "hello",
+                "used_tools": [
+                    ToolUsageRecord(
+                        name="ask_question",
+                        provider="mcp",
+                        status="succeeded",
+                        agent_id="super_agent",
+                        server_id="deepwiki",
+                    )
+                ],
+            }
+
+    monkeypatch.setattr(
+        "agentplatform.runtime.engine.build_langgraph",
+        lambda *args, **kwargs: StreamingApp(),
+    )
+    engine = Engine(load_spec(EXAMPLE), mcp_client_factory=_factory(_fake_clients()))
+
+    events = list(engine.stream("hello"))
+
+    assert [event.type for event in events] == ["route", "answer_delta", "answer_delta", "final"]
+    assert (
+        "".join(event.content or "" for event in events if event.type == "answer_delta") == "hello"
+    )
+    assert events[-1] == RunStreamEvent(
+        type="final",
+        content="hello",
+        route=("main_router", "main_router/super_agent"),
+        system_name="Rami Levy AI System",
+        used_tools=(
+            ToolUsageRecord(
+                name="ask_question",
+                provider="mcp",
+                status="succeeded",
+                agent_id="super_agent",
+                server_id="deepwiki",
+            ),
+        ),
+    )
+
+
 def test_engine_start_starts_mcp_manager(monkeypatch: Any) -> None:
     clients = _fake_clients()
     engine = _engine(monkeypatch, clients)
@@ -296,6 +350,85 @@ def test_cli_run_prints_tool_usage(monkeypatch: Any) -> None:
     assert "* ask_question [mcp: deepwiki] succeeded" in result.stderr
     assert "* book_flight [local] failed: tool failed" in result.stderr
     assert FakeEngine.calls == ["start", "run", "stop"]
+
+
+def test_cli_run_stream_prints_chunks_once_and_tool_usage(monkeypatch: Any) -> None:
+    class FakeEngine:
+        calls: ClassVar[list[str]] = []
+
+        def __init__(self, loaded: object) -> None:
+            self.loaded = loaded
+
+        def start(self) -> None:
+            self.calls.append("start")
+
+        def stream(self, message: str):
+            self.calls.append("stream")
+            yield RunStreamEvent(type="route", route=("deepwiki_agent",))
+            yield RunStreamEvent(type="answer_delta", content="hel")
+            yield RunStreamEvent(type="answer_delta", content="lo")
+            yield RunStreamEvent(
+                type="final",
+                content="hello",
+                route=("deepwiki_agent",),
+                system_name="DeepWiki Repository Research Smoke Test",
+                used_tools=(
+                    ToolUsageRecord(
+                        name="ask_question",
+                        provider="mcp",
+                        status="succeeded",
+                        agent_id="deepwiki_agent",
+                        server_id="deepwiki",
+                    ),
+                ),
+            )
+
+        def run(self, message: str) -> RunResult:
+            raise AssertionError("non-streaming run should not be called")
+
+        def stop(self) -> None:
+            self.calls.append("stop")
+
+    monkeypatch.setattr(cli_main, "Engine", FakeEngine)
+    result = CliRunner().invoke(cli_main.app, ["run", str(EXAMPLE), "--stream", "hello"])
+
+    assert result.exit_code == 0
+    assert result.stdout == "hello\n"
+    assert "answer :" in result.stderr
+    assert "hellohello" not in result.stdout
+    assert "* ask_question [mcp: deepwiki] succeeded" in result.stderr
+    assert FakeEngine.calls == ["start", "stream", "stop"]
+
+
+def test_cli_run_stream_stops_engine_when_stream_raises(monkeypatch: Any) -> None:
+    class FailingEngine:
+        calls: ClassVar[list[str]] = []
+
+        def __init__(self, loaded: object) -> None:
+            self.loaded = loaded
+
+        def start(self) -> None:
+            self.calls.append("start")
+
+        def stream(self, message: str):
+            self.calls.append("stream")
+            yield RunStreamEvent(type="route", route=("deepwiki_agent",))
+            yield RunStreamEvent(type="answer_delta", content="partial")
+            raise EngineRunError("boom", used_tools=())
+
+        def run(self, message: str) -> RunResult:
+            raise AssertionError("non-streaming run should not be called")
+
+        def stop(self) -> None:
+            self.calls.append("stop")
+
+    monkeypatch.setattr(cli_main, "Engine", FailingEngine)
+    result = CliRunner().invoke(cli_main.app, ["run", str(EXAMPLE), "--stream", "hello"])
+
+    assert result.exit_code == 1
+    assert result.stdout == "partial"
+    assert "Runtime error: boom" in result.stderr
+    assert FailingEngine.calls == ["start", "stream", "stop"]
 
 
 def test_cli_run_prints_tool_usage_when_engine_run_fails(monkeypatch: Any) -> None:

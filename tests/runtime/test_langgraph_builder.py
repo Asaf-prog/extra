@@ -11,8 +11,8 @@ from typing import Any
 import pytest
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_core.runnables import RunnableLambda
 from pydantic import PrivateAttr
 
@@ -148,6 +148,51 @@ class ToolCallingFactory:
             model.tool_call_name = self.tool_call_name
         self.models.append(model)
         return model
+
+
+class StreamingFakeModel(BaseChatModel):
+    chunks: list[str]
+
+    @property
+    def _llm_type(self) -> str:
+        return "fake-streaming"
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        return ChatResult(
+            generations=[ChatGeneration(message=AIMessage(content="".join(self.chunks)))]
+        )
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ):
+        for chunk in self.chunks:
+            yield ChatGenerationChunk(message=AIMessageChunk(content=chunk))
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> StreamingFakeModel:
+        return self
+
+
+class StreamingFactory:
+    def __init__(self, chunks: list[str]) -> None:
+        self.chunks = chunks
+
+    def __call__(
+        self,
+        provider: str,
+        name: str,
+        temperature: float | None,
+    ) -> StreamingFakeModel:
+        return StreamingFakeModel(chunks=self.chunks)
 
 
 class FakeRuntimeToolRegistry:
@@ -463,6 +508,35 @@ def test_tool_usage_is_not_inferred_from_answer_text(plugin_base_dir: Path) -> N
 
     assert "ask_question" in result["answer"]
     assert result.get("used_tools", []) == []
+
+
+def test_agent_node_streams_final_answer_chunks(plugin_base_dir: Path) -> None:
+    graph = compile_spec(load_spec(EXAMPLE).spec)
+    app = build_langgraph(
+        graph,
+        agents_yml=plugin_base_dir / "agents.yml",
+        model_factory=StreamingFactory(["hello", " ", "world"]),
+    )
+    chunks: list[str] = []
+    routes: list[tuple[str, ...]] = []
+
+    result = app.invoke(
+        {
+            "message": "book a flight",
+            "answer_stream": chunks.append,
+            "route_stream": routes.append,
+        }
+    )
+
+    assert chunks == ["hello", " ", "world"]
+    assert result["answer"] == "hello world"
+    assert routes == [
+        (
+            "main_router",
+            "main_router/flights_router",
+            "main_router/flights_router/domestic_flights_agent",
+        )
+    ]
 
 
 def test_agent_without_mcp_behaves_as_before(plugin_base_dir: Path) -> None:

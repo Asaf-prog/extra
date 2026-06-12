@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from agentplatform import __version__
 from agentplatform.runtime.engine import Engine, EngineRunError
+from agentplatform.runtime.streaming import RunStreamEvent
 from agentplatform.runtime.tool_models import ToolUsageRecord
 from agentplatform.spec import SpecError, load_spec
 from agentplatform.spec.stubs import ResolverGenerateMode, generate_stubs
@@ -113,6 +114,7 @@ def run(
     path: str = typer.Argument(..., help="Path to agents.yml"),
     message: str = typer.Argument(..., help="Message to send to the agent system"),
     env: str | None = typer.Option(None, "--env", help="Path to .env (default: next to YAML)"),
+    stream: bool = typer.Option(False, "--stream", help="Stream the final assistant answer."),
 ) -> None:
     """Run a message through the agent system defined in the YAML.
 
@@ -136,11 +138,15 @@ def run(
         engine = Engine(loaded)
         try:
             engine.start()
+            if stream:
+                _run_streaming(engine, loaded.spec.system.name, message)
+                return
             result = engine.run(message)
         finally:
             engine.stop()
     except EngineRunError as exc:
-        _print_tool_usage(exc.used_tools)
+        if exc.used_tools:
+            _print_tool_usage(exc.used_tools)
         typer.echo(f"✗ Runtime error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     except Exception as exc:
@@ -155,6 +161,48 @@ def run(
     typer.echo(result.answer)  # stdout — pipeable
     typer.echo("", err=True)
     _print_tool_usage(result.used_tools)
+
+
+def _run_streaming(engine: Engine, system_name: str, message: str) -> None:
+    typer.echo(f"  system : {system_name}", err=True)
+    typer.echo(f"  message: {message}", err=True)
+    typer.echo("", err=True)
+
+    answer_started = False
+    final_event: RunStreamEvent | None = None
+
+    for event in engine.stream(message):
+        if event.type == "route" and event.route is not None:
+            typer.echo(f"  route  : {' → '.join(event.route)}", err=True)
+            typer.echo("", err=True)
+            typer.echo("answer :", err=True)
+            answer_started = True
+            continue
+
+        if event.type == "answer_delta" and event.content:
+            if not answer_started:
+                typer.echo("answer :", err=True)
+                answer_started = True
+            sys.stdout.write(event.content)
+            sys.stdout.flush()
+            continue
+
+        if event.type == "final":
+            final_event = event
+
+    if final_event is None:
+        raise RuntimeError("Streaming run completed without a final event.")
+
+    if not answer_started:
+        if final_event.route is not None:
+            typer.echo(f"  route  : {' → '.join(final_event.route)}", err=True)
+            typer.echo("", err=True)
+        typer.echo("answer :", err=True)
+
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    typer.echo("", err=True)
+    _print_tool_usage(final_event.used_tools)
 
 
 def _print_tool_usage(used_tools: tuple[ToolUsageRecord, ...]) -> None:

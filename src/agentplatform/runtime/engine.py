@@ -9,14 +9,16 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import queue
 import threading
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Iterator
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 
 from agentplatform.compiler import compile_spec
 from agentplatform.runtime.langgraph_builder import build_langgraph
 from agentplatform.runtime.mcp_manager import MCPClientFactory, MCPManager
+from agentplatform.runtime.streaming import RunStreamEvent
 from agentplatform.runtime.tool_models import ToolUsageRecord
 from agentplatform.runtime.tool_registry import LocalToolProvider, MCPToolProvider, ToolRegistry
 from agentplatform.spec.loader import LoadedSpec
@@ -147,6 +149,64 @@ class Engine:
             answer=result.get("answer", ""),
             used_tools=tuple(result.get("used_tools", used_tools)),
         )
+
+    def stream(self, message: str) -> Iterator[RunStreamEvent]:
+        """Invoke the agent system and yield platform-level streaming events.
+
+        Lifecycle remains application-owned: callers must call ``start()``
+        before streaming when runtime infrastructure such as MCP is needed, and
+        must call ``stop()`` in their own ``finally`` block.
+        """
+        event_queue: queue.Queue[RunStreamEvent | BaseException | None] = queue.Queue()
+        used_tools: list[ToolUsageRecord] = []
+
+        def emit_answer_delta(content: str) -> None:
+            event_queue.put(RunStreamEvent(type="answer_delta", content=content))
+
+        def emit_route(route: tuple[str, ...]) -> None:
+            event_queue.put(RunStreamEvent(type="route", route=route))
+
+        def run_graph() -> None:
+            input_state: dict[str, object] = {
+                "message": message,
+                "used_tools": used_tools,
+                "answer_stream": emit_answer_delta,
+                "route_stream": emit_route,
+            }
+            try:
+                result = self._app.invoke(cast(Any, input_state))
+            except Exception as exc:
+                event_queue.put(exc)
+                return
+
+            event_queue.put(
+                RunStreamEvent(
+                    type="final",
+                    content=result.get("answer", ""),
+                    route=tuple(result.get("visited", [])),
+                    system_name=self._system_name,
+                    used_tools=tuple(result.get("used_tools", used_tools)),
+                )
+            )
+            event_queue.put(None)
+
+        worker = threading.Thread(
+            target=run_graph,
+            name="agentplatform-engine-stream",
+            daemon=True,
+        )
+        worker.start()
+
+        try:
+            while True:
+                item = event_queue.get()
+                if item is None:
+                    break
+                if isinstance(item, BaseException):
+                    raise EngineRunError(str(item), used_tools=tuple(used_tools)) from item
+                yield item
+        finally:
+            worker.join()
 
 
 class _EngineAsyncLoop:

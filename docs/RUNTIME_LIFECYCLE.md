@@ -56,6 +56,34 @@ Everything that varies between requests lives on the `ExecutionContext`.
 
 ---
 
+## Streaming Runs
+
+`Engine.run(message)` remains the non-streaming API and returns a completed
+`RunResult`.
+
+`Engine.stream(message)` is the streaming API. It executes the same compiled
+graph and yields platform-level `RunStreamEvent` values such as
+`answer_delta`, `route`, and `final`. Callers consume these events instead of
+LangChain-specific chunks. The final event preserves the completed answer,
+route, system name, and runtime-generated tool usage summary.
+
+Streaming does not own lifecycle. Applications still call:
+
+```python
+engine.start()
+try:
+    for event in engine.stream(message):
+        ...
+finally:
+    engine.stop()
+```
+
+`agentctl run --stream` uses this flow and writes `answer_delta` content to
+stdout as chunks arrive. It does not print the completed answer again after the
+final event.
+
+---
+
 ## RuntimeEngine
 
 - **Long-lived**, created at startup, one per process.

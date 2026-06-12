@@ -229,6 +229,12 @@ available:
 poetry run python -m agentplatform.cli.main run examples/deepwiki_mcp_agents.yml "Use DeepWiki to ask what the public GitHub repository modelcontextprotocol/python-sdk is about"
 ```
 
+To stream the final assistant answer as it is generated, add `--stream`:
+
+```bash
+poetry run python -m agentplatform.cli.main run examples/deepwiki_mcp_agents.yml --stream "Use DeepWiki to explain what the public GitHub repository modelcontextprotocol/python-sdk is about."
+```
+
 Additional useful prompts:
 
 ```bash
