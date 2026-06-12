@@ -5,12 +5,11 @@
 > topology in YAML; the engine validates, compiles, and runs that system through
 > a long-lived runtime.
 
-**Status: 🚧 Repository foundation phase.** This repository currently contains
-documentation, architecture decisions, agent skills, and ordered implementation
-tasks. **YAML loading and validation are implemented; the compiler, runtime,
-plugin loader, MCP client, and API are not implemented yet.** Nothing below
-describing runtime execution is working software — it describes the intended
-design that future work will build.
+**Status: 🚧 Active development.** The YAML validator, compiler, runtime
+engine, LangGraph-based routing, resolver plugin system, tool plugin loading,
+prompt file rendering, and CLI (`validate`, `generate`, `run`) are
+**implemented**. The access plugin, MCP client, API server, deployment, and
+observability are **not yet implemented**.
 
 ---
 
@@ -45,8 +44,8 @@ specification** of their system rather than its mechanics.
 
 ## 4. Current status
 
-Repository foundation phase. See the [Roadmap](docs/ROADMAP.md) and the
-[`tasks/`](tasks/) directory for the planned, ordered implementation work.
+Active development. See the [Roadmap](docs/ROADMAP.md) and the
+[`tasks/`](tasks/) directory for per-phase status.
 
 | Area                      | Status         |
 | ------------------------- | -------------- |
@@ -54,12 +53,14 @@ Repository foundation phase. See the [Roadmap](docs/ROADMAP.md) and the
 | Agent skills              | ✅ In place     |
 | Implementation tasks      | ✅ Defined      |
 | YAML schema & validation  | ✅ Implemented (0002) |
-| Compiled agent graph      | ⏳ Planned (0003) |
-| Runtime engine            | ⏳ Planned (0004) |
-| Prompt rendering          | ⏳ Planned (0005) |
-| Plugin context/access     | ⏳ Planned (0006) |
-| Tools & MCP               | ⏳ Planned (0007) |
-| CLI / API / Docker        | ⏳ Planned (0008–0010) |
+| Compiled agent graph      | ✅ Implemented (0003) |
+| Runtime engine            | ✅ Implemented (0004) |
+| Prompt rendering          | 🔶 Partial (0005) — file loading + substitution work; no dedicated module |
+| Resolver plugins          | ✅ Implemented (0006) — shared/agent-scoped, generation modes, TOML |
+| Access plugin             | ⏳ Planned (0006) — contract defined, not wired into routing |
+| Tool plugins              | 🔶 Partial (0007) — Python tools work; MCP client not implemented |
+| CLI                       | 🔶 Partial (0008) — validate, generate, run, version work |
+| API / Docker              | ⏳ Planned (0009–0010) |
 | Observability             | ⏳ Planned (0011) |
 
 ## 5. Planned architecture
@@ -97,13 +98,12 @@ defaults:
 
 tools:
   book_flight:
-    class: FlightTools
-    method: book_flight
+    description: "Search and book a flight given origin, destination and travel date"
 
 resolvers:
   current_date:
-    class: Resolvers
-    method: current_date
+    scope: shared
+    return_type: str
 
 orchestrators:
   main_router:
@@ -131,14 +131,22 @@ See [examples/agents.yml](examples/agents.yml) and
 ## 7. How plugins and access work
 
 The engine contains **no** customer-specific authentication, authorization, or
-business-data lookup code. Customers provide Python plugins with a uniform
-class + method shape. Resolver plugins fill prompt variables before a node runs;
-tool plugins are exposed to the LLM at runtime.
+business-data lookup code. Customers provide Python plugins.
 
-Authorization is opt-in. A node can set `protected: true`; if any protected node
-exists, the engine expects `plugins/access.py` with
-`AccessResolver.can_access(ctx, node_id) -> bool`. Denied protected nodes are
-hidden from routers before routing. See
+**Resolver plugins** fill prompt variables before a node runs. Resolvers are
+generated into a `BaseResolver` (shared methods) plus per-agent subclasses
+(agent-specific methods). The TOML file `plugins/resolvers/resolvers.toml` maps
+each agent to its resolver class. The runtime loads the class dynamically,
+instantiates it once, and calls methods by name. Shared methods resolve through
+normal Python inheritance. Run `agentctl generate` to create resolver stubs.
+
+**Tool plugins** are Python methods exposed to the LLM at runtime. Each agent
+declares which tools it may use; the runtime binds only those tools.
+
+**Access plugin** (planned): a node can set `protected: true`; if any protected
+node exists, the engine expects `plugins/access.py` with
+`AccessResolver.can_access(ctx, node_id) -> bool`. The contract is defined but
+**not yet wired into routing**. See
 [docs/SIDECAR_CONTEXT_AUTH.md](docs/SIDECAR_CONTEXT_AUTH.md).
 
 ## 8. How prompts are rendered dynamically
@@ -164,9 +172,9 @@ This repository is **agent-first**. If you are an AI coding agent:
 
 > Requires **Python 3.11+**. The project uses a `src/` layout with package
 > `agentplatform` and is configured via `pyproject.toml` (hatchling build;
-> `ruff`, `mypy`, `pytest` for tooling). The CLI currently supports
-> `agentctl version` and `agentctl validate`; graph inspection, run, serve, and
-> deployment commands are still planned.
+> `ruff`, `mypy`, `pytest` for tooling). The CLI supports `agentctl version`,
+> `agentctl validate`, `agentctl generate` (with `--mode`, `--agent`,
+> `--force`), and `agentctl run`. Graph inspection and serve are planned.
 
 ### 1. Create and activate a virtual environment
 
@@ -188,6 +196,7 @@ make install                   # runs: pip install -e ".[dev]"
 which python                   # → <repo>/.venv/bin/python
 agentctl version               # → 0.0.0  (console script; alias: agent-platform)
 agentctl validate examples/agents.yml
+agentctl generate examples/agents.yml --mode all
 make check                     # lint (ruff) + typecheck (mypy) + test (pytest)
 ```
 
@@ -214,8 +223,9 @@ indexing quirk, not a code error).
 ## 11. Roadmap
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the phased plan. In short:
- foundation → spec & validation → compiler → runtime → prompts → plugin access/context →
-tools/MCP → CLI/API → deployment → observability → quality gates.
+foundation → spec & validation → compiler → runtime → prompts → plugin
+access/context → tools/MCP → CLI/API → deployment → observability → quality
+gates. Phases 0–4 are done; 5–8 are partially implemented; 9–12 are planned.
 
 ## License
 

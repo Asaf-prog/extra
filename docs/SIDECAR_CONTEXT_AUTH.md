@@ -36,50 +36,111 @@ tenant ids, roles, subscriptions, and business data.
 Resolvers fill prompt variables before a node runs. They are deterministic from
 the engine's point of view and are not exposed to the LLM.
 
+### YAML declaration
+
+Each resolver has a **scope** (`shared` or `agent`) and a return type:
+
 ```yaml
 resolvers:
   current_date:
+    scope: shared        # generated on BaseResolver, inherited by all agents
+    return_type: str
+  user_name:
     scope: shared
     return_type: str
+  subscription:
+    scope: agent         # generated only on the declaring agent's subclass
+    return_type: str
+
+agents:
+  super_agent:
+    description: "Handle supermarket orders."
+    prompts:
+      system: "prompts/super/system.md"
+    resolvers: [current_date, user_name, subscription]
 ```
+
+### Generated file layout
+
+`agentctl generate` produces a **file-per-class** layout:
+
+```text
+plugins/resolvers/
+  __init__.py
+  base.py                        # BaseResolver (ABC) with shared methods
+  domestic_flights_agent.py      # agent-specific subclass
+  international_flights_agent.py
+  super_agent.py
+  resolvers.toml                 # maps agent ids → resolver class import paths
+```
+
+### TOML mapping
 
 ```toml
 [resolvers]
 base_class = "plugins.resolvers.base.BaseResolver"
 
+[resolvers.dependencies]
+rest_client = "internal_rest_client"
+
 [resolvers.agents.super_agent]
 class = "plugins.resolvers.super_agent.SuperAgentResolver"
 ```
 
-```python
-from agentplatform.runtime import ExecutionContext
+### Customer implementation
 
+```python
+# plugins/resolvers/base.py
+from agentplatform.runtime import ExecutionContext
 
 class BaseResolver:
     def __init__(self, rest_client: object | None = None) -> None:
         self.rest_client = rest_client
 
     def current_date(self, ctx: ExecutionContext) -> str:
-        return "2026-06-06"
+        return "2026-06-12"
 
+    def user_name(self, ctx: ExecutionContext) -> str:
+        return "Amit"
+```
+
+```python
+# plugins/resolvers/super_agent.py
+from plugins.resolvers.base import BaseResolver
+from agentplatform.runtime import ExecutionContext
 
 class SuperAgentResolver(BaseResolver):
-    pass
+    def subscription(self, ctx: ExecutionContext) -> str:
+        return "premium"
 ```
 
-A node opts into resolver values:
+`SuperAgentResolver` inherits `current_date` and `user_name` from
+`BaseResolver`. Only `subscription` (agent-scoped) needs an implementation in
+the child class.
 
-```yaml
-agents:
-  super_agent:
-    description: "Handle supermarket orders."
-    prompts:
-      system: "prompts/super/system.md"
-    resolvers: [current_date]
-```
+### Generation modes
+
+| Mode | Command | Effect |
+| ---- | ------- | ------ |
+| `all` | `agentctl generate agents.yml --mode all` | Regenerate base, all agents, TOML |
+| `children` | `agentctl generate agents.yml --mode children` | Agent files only; skip base |
+| `child` | `agentctl generate agents.yml --mode child --agent super_agent` | One agent file only |
+
+Use `--force` to overwrite existing files. Without `--force`, existing method
+bodies are preserved and only missing stubs are appended. Stale methods (scope
+changes, removed resolvers, orphan files) are reported but never deleted
+automatically.
+
+### Runtime resolution
+
+1. The runtime loads the agent's resolver class from TOML.
+2. The class is instantiated once with configured dependencies.
+3. Methods are called by resolver id; shared methods resolve via Python
+   inheritance.
+4. Outputs land on `ExecutionContext` and are request-scoped.
 
 Missing resolver declarations, missing plugin methods, resolver errors, or
-missing variables in strict prompt rendering should produce clear errors.
+missing variables in strict prompt rendering produce clear errors.
 
 ---
 

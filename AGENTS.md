@@ -15,10 +15,12 @@ compiles it into a typed internal graph, and runs it through a long-lived
 runtime that renders prompt files, calls resolver/tool plugins and MCP servers,
 exposes an API, and produces execution traces.
 
-The product is **not built yet**. The repository is currently in the
-**foundation phase**: documentation, architecture decisions, agent skills, and
-task definitions. Future agents implement the product task-by-task using the
-files in `tasks/`.
+The repository is in **active development**. The YAML validator, compiler,
+runtime engine, resolver plugin system, tool plugin loading, prompt rendering,
+and CLI are implemented. The access plugin, MCP client, API server, deployment,
+and observability are not yet implemented. See [docs/ROADMAP.md](docs/ROADMAP.md)
+for per-phase status. Agents implement the product task-by-task using the files
+in `tasks/`.
 
 ---
 

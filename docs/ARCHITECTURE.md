@@ -55,9 +55,12 @@ The long-term promise:
 3. **Extend** it with resolvers, plugins, or a sidecar.
 4. **Deploy** it when ready.
 
-> Status: **foundation phase.** The runtime, compiler, validator, prompt
-> renderer, plugins, MCP, API, and CLI are **not implemented yet**. This document
-> describes the intended design; nothing here should be read as "already works."
+> Status: **active development.** The YAML validator, compiler, runtime engine,
+> LangGraph builder, resolver plugin system (shared + agent-scoped), tool plugin
+> loading, prompt file rendering, and CLI (`validate`, `generate`, `run`) are
+> **implemented**. The access plugin, MCP client, API server, deployment, and
+> observability are **not yet implemented**. See
+> [ROADMAP.md](ROADMAP.md) for per-phase status.
 
 ---
 
@@ -114,8 +117,9 @@ Responsibilities:
 - **Compile** the flat declarations plus `graph` topology into a typed,
   immutable `CompiledAgentGraph`, assigning a **stable node path** to each
   occurrence in the graph.
-- *(Optional, later)* generate **resolver/plugin stubs** for the client to fill
-  in, and *(later)* generate **deployment artifacts**.
+- Generate **resolver/plugin stubs** for the client to fill in
+  (`agentctl generate` — ✅ implemented with generation modes and overwrite
+  protection), and *(later)* generate **deployment artifacts**.
 
 The runtime only ever sees the compiled, typed model — never raw YAML dicts
 (see [ADR 0002](adr/0002-yaml-is-compiled-not-executed-directly.md)).
@@ -314,7 +318,10 @@ by the engine (not exposed to the LLM) and run **before** a node executes:
 ```yaml
 resolvers:
   current_date:
-    scope: shared
+    scope: shared        # generated once in BaseResolver
+    return_type: str
+  subscription:
+    scope: agent         # generated in each agent's resolver subclass
     return_type: str
 
 agents:
@@ -322,10 +329,14 @@ agents:
     description: "Handle supermarket orders."
     prompts:
       system: "prompts/super/system.md"
-    resolvers: [current_date]
+    resolvers: [current_date, subscription]
 ```
 
-The resolver class is configured in `plugins/resolvers/resolvers.toml`:
+Each resolver has a **scope**: `shared` (generated on `BaseResolver`, inherited
+by all agents) or `agent` (generated only on the declaring agent's resolver
+subclass). Scope is validated at YAML load time.
+
+The resolver class mapping is configured in `plugins/resolvers/resolvers.toml`:
 
 ```toml
 [resolvers]
@@ -338,9 +349,43 @@ rest_client = "internal_rest_client"
 class = "plugins.resolvers.super_agent.SuperAgentResolver"
 ```
 
-Resolver outputs are request-scoped and land on the `ExecutionContext`.
-Shared resolver methods are implemented once on `BaseResolver`; agent-specific
-resolver methods live only on the relevant agent resolver subclass.
+### Resolver file layout
+
+Resolver stubs are generated into a **file-per-class** layout:
+
+```text
+plugins/resolvers/
+  __init__.py
+  base.py                        # BaseResolver with shared methods
+  domestic_flights_agent.py      # per-agent subclass
+  international_flights_agent.py
+  super_agent.py
+  resolvers.toml                 # maps agent ids → resolver class paths
+```
+
+### Resolver generation
+
+`agentctl generate` creates resolver stubs with three modes:
+
+| Mode | Command | Effect |
+| ---- | ------- | ------ |
+| `all` | `agentctl generate agents.yml --mode all` | Regenerate `base.py`, all agent files, and TOML |
+| `children` | `agentctl generate agents.yml --mode children` | Generate/update agent files only; skip `base.py` |
+| `child` | `agentctl generate agents.yml --mode child --agent super_agent` | Generate/update one agent file only |
+
+By default, existing customer implementations are preserved — only missing
+method stubs are appended. Use `--force` to overwrite. Stale files and methods
+(scope changes, removed resolvers) are reported but never deleted automatically.
+
+### Runtime resolution
+
+1. The runtime loads the selected agent's resolver class from TOML.
+2. The resolver class is instantiated once per loader (with configured
+   dependencies).
+3. Resolver methods are called by name; shared methods resolve through normal
+   Python inheritance from `BaseResolver`.
+4. Resolver outputs are request-scoped and land on `ExecutionContext`.
+5. The runtime is generic — it has no knowledge of resolver business logic.
 
 ---
 
@@ -449,40 +494,55 @@ First-run flow status:
 
 ```bash
 make install
-agentctl validate examples/agents.yml                  # implemented
-agentctl graph    examples/agents.yml                  # planned
-agentctl run      examples/agents.yml --message "hello" # planned
+agentctl validate examples/agents.yml                            # ✅ implemented
+agentctl generate examples/agents.yml --mode all                 # ✅ implemented
+agentctl run      examples/agents.yml --message "hello"          # ✅ implemented (requires LLM API key)
+agentctl graph    examples/agents.yml                            # ⏳ planned
+agentctl serve    examples/agents.yml                            # ⏳ planned
 ```
 
-Real LLMs, real MCP servers, real customer plugins, and deployment come **after**
-the mock-based local experience works. See [`ROADMAP.md`](ROADMAP.md).
+Validate, generate, and run work today. See [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
-## 14. First Implemented Layer
+## 14. Implementation Status
 
-The first implemented product layer is **YAML schema and validation**
-(task [`0002`](../tasks/0002-yaml-schema-and-validation.md)). It validates
-configuration only — **not** the runtime, MCP, sidecar, real LLM, or deployment.
+The following layers are implemented:
 
-Validation covers:
+**Spec & validation (0002 — ✅ done):**
+Pydantic models, safe YAML loader, JSON Schema validation, semantic validation
+(graph, resolver/tool/MCP references, prompt paths, secrets, resolver scope).
 
-- Pydantic models for the spec;
-- a safe YAML loader;
-- **definitions** validation (providers, MCP servers, tools, resolvers, agents,
-  orchestrators, prompts);
-- **graph** validation (single root, declared nodes, consistent structure);
-- repeated graph occurrence detection groundwork for future node paths;
-- **prompt path** validation;
-- **tool / MCP reference** validation;
-- **resolver reference** validation;
-- **no-hardcoded-secrets** validation;
-- tests for valid and invalid specs.
+**Compiler (0003 — ✅ done):**
+Compiles validated spec into an immutable `CompiledAgentGraph` with resolved
+node declarations, stable node paths, and model/resolver/tool/MCP bindings.
 
-It uses [`examples/agents.yml`](../examples/agents.yml) as a valid fixture and
-[`examples/config.schema.json`](../examples/config.schema.json) as the schema
-source of truth, then adds semantic checks the JSON Schema cannot express
-cleanly.
+**Runtime engine (0004 — ✅ done):**
+`Engine` wraps compile + LangGraph build. `ExecutionContext` is per-request.
+LangGraph-based routing: orchestrators route via LLM structured output; agents
+execute with tools bound. Tool-call loop runs until the model stops.
+
+**Prompt rendering (0005 — 🔶 partial):**
+Prompt files are loaded from disk and `{{ variable }}` placeholders are
+substituted with resolver values per request. No dedicated `prompts/` module,
+parsed-template cache, or strict missing-variable errors yet.
+
+**Resolver plugins (0006 — 🔶 partial, resolver side done):**
+Full resolver plugin system: TOML-configured `BaseResolver` + per-agent
+subclasses, shared/agent-scoped resolvers, dynamic loading, generation modes
+(`--mode all/children/child`), overwrite protection, stale detection. Access
+plugin not yet wired into routing.
+
+**Tool plugins (0007 — 🔶 partial):**
+Python plugin tools load from `plugins/tools/`, are bound per-agent, and
+execute in a tool-call loop. MCP client not implemented.
+
+**CLI (0008 — 🔶 partial):**
+`agentctl validate`, `agentctl generate` (with `--mode`, `--agent`, `--force`),
+`agentctl run`, `agentctl version`. `agentctl graph` not implemented.
+
+**Not started:** API server (0009), Docker (0010), observability (0011),
+quality-gate hardening (0012).
 
 ---
 

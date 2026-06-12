@@ -1,7 +1,9 @@
 # Prompt Rendering
 
-Prompt rendering is planned for task `0005`. This document describes the design
-contract the implementation must satisfy.
+Prompt rendering is partially implemented. Prompt file loading and `{{ variable }}`
+substitution work inside the LangGraph builder. A dedicated `prompts/` module
+with parsed-template caching and strict missing-variable errors is planned
+(task `0005`). This document describes the full design contract.
 
 Prompt text lives in files, not inline YAML. Nodes reference prompt files under a
 `prompts:` object:

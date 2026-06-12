@@ -3,8 +3,7 @@
 This document describes the declarative Agent Engine configuration. The schema
 source for the current example is [`examples/config.schema.json`](../examples/config.schema.json),
 and the reference sample is [`examples/agents.yml`](../examples/agents.yml).
-Validation and schema models are implemented; compilation is planned for task
-`0003`.
+Validation, schema models, compilation, and runtime execution are implemented.
 
 The YAML has two conceptual halves:
 
@@ -37,8 +36,7 @@ mcps:
 
 tools:
   book_flight:
-    class: FlightTools
-    method: book_flight
+    description: "Search and book a flight given origin, destination and travel date"
 
 resolvers:
   current_date:
@@ -170,15 +168,23 @@ different times and have different trust boundaries.
 | Token cost | None | Yes |
 | Purpose | Fill `{{variables}}` | Perform actions |
 
-Resolvers are declared as ids in YAML and implemented as methods on the
-agent-specific class configured in `plugins/resolvers/resolvers.toml`:
+Resolvers are declared as ids in YAML. Each resolver has a **scope**:
+
+- `shared` — generated once on `BaseResolver`; inherited by all agents.
+- `agent` (default) — generated only on the declaring agent's resolver subclass.
 
 ```yaml
 resolvers:
   current_date:
     scope: shared
     return_type: str
+  subscription:
+    scope: agent
+    return_type: str
 ```
+
+Resolver classes are configured in `plugins/resolvers/resolvers.toml`, one file
+per agent:
 
 ```toml
 [resolvers]
@@ -188,11 +194,14 @@ base_class = "plugins.resolvers.base.BaseResolver"
 class = "plugins.resolvers.domestic_flights_agent.DomesticFlightsAgentResolver"
 ```
 
-The engine loads the selected agent's customer resolver class once. Methods
-receive `ctx`, which the engine builds from request headers and request data.
-Shared resolver methods are generated on `BaseResolver` and inherited by agent
-resolver classes; agent-scoped resolver methods are generated only on the
-relevant child class.
+The engine loads the selected agent's resolver class once. Methods receive `ctx`,
+which the engine builds from request headers and request data. Shared resolver
+methods live on `BaseResolver` and are inherited through normal Python
+inheritance; agent-scoped methods live only on the relevant child class.
+
+Run `agentctl generate` to create resolver stubs. See
+[`SIDECAR_CONTEXT_AUTH.md`](SIDECAR_CONTEXT_AUTH.md) for the full resolver
+plugin contract including generation modes and overwrite protection.
 
 ---
 

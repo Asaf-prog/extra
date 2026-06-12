@@ -2,7 +2,10 @@
 
 This directory contains the design and architecture documentation for the
 Declarative Agent Platform. It is the source of truth for **how the system is
-meant to work** during the foundation phase, before implementation exists.
+meant to work**. The core pipeline (validate → compile → runtime → prompts →
+resolver plugins → tool plugins → CLI) is implemented; remaining layers (access
+plugin, MCP client, API server, deployment, observability) are documented as
+design contracts for future implementation.
 
 ## Reading order
 
