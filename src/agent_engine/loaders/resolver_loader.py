@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import types
 from collections.abc import Callable
 from pathlib import Path
@@ -18,12 +19,17 @@ class ResolverLoader:
     once per agent_id and cached — shared resources (DB connections, clients)
     are initialized in __init__ and reused across resolver calls.
 
+    If plugins/resolvers/shared.py exists, it is loaded first and registered in
+    sys.modules as "shared" so agent files can inherit from SharedResolver via
+    `from shared import SharedResolver`.
+
     Resolver methods are named after resolver IDs and accept a single ctx dict.
     """
 
     def __init__(self, base_dir: Path) -> None:
         self._base_dir = base_dir
         self._instances: dict[str, Any] = {}
+        self._shared_loaded = False
 
     def load(self, agent_id: str, resolver_id: str) -> Callable[[dict[str, Any]], Any]:
         instance = self._get_or_create(agent_id)
@@ -42,7 +48,9 @@ class ResolverLoader:
         return self._instances[agent_id]
 
     def _instantiate(self, agent_id: str) -> Any:
-        path = self._base_dir / "plugins" / "resolvers" / f"{agent_id}.py"
+        resolvers_dir = self._base_dir / "plugins" / "resolvers"
+        self._ensure_shared_module(resolvers_dir)
+        path = resolvers_dir / f"{agent_id}.py"
         if not path.is_file():
             raise ResolverLoaderError(
                 f"Resolver plugin not found: {path}\nRun `agentctl generate` to create the stub."
@@ -57,6 +65,20 @@ class ResolverLoader:
             raise ResolverLoaderError(
                 f"Failed to instantiate Resolver for agent '{agent_id}': {exc}"
             ) from exc
+
+    def _ensure_shared_module(self, resolvers_dir: Path) -> None:
+        """Load shared.py once and register it as sys.modules['shared'].
+
+        This lets agent resolver files do `from shared import SharedResolver`
+        without needing shared.py on the Python path.
+        """
+        if self._shared_loaded:
+            return
+        self._shared_loaded = True
+        shared_path = resolvers_dir / "shared.py"
+        if shared_path.is_file():
+            module = _import_from_path(shared_path)
+            sys.modules.setdefault("shared", module)
 
 
 def _import_from_path(path: Path) -> types.ModuleType:

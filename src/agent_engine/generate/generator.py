@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from agent_engine.core.spec import AgentSpec, GraphNode, OrchestratorSpec, SystemSpec
+from agent_engine.core.spec import AgentSpec, GraphNode, SystemSpec
 
 
 @dataclass
@@ -16,11 +16,15 @@ class Generator:
     """Generates plugin stubs for tools and resolvers declared in the spec.
 
     Never overwrites existing files — only creates missing stubs.
+
+    Shared resolvers (scope: shared) are generated once in plugins/resolvers/shared.py
+    as class SharedResolver. Per-agent files inherit from SharedResolver and only
+    include stubs for their agent-scoped resolvers.
     """
 
     def generate(self, spec: SystemSpec, base_dir: Path) -> GenerateResult:
         result = GenerateResult()
-        tool_ids, resolver_agent_ids, has_protected = _collect(spec.graph)
+        tool_ids, shared_ids, agent_resolver_ids, agents_with_shared, has_protected = _collect(spec.graph)
 
         tools_dir = base_dir / "plugins" / "tools"
         tools_dir.mkdir(parents=True, exist_ok=True)
@@ -29,10 +33,19 @@ class Generator:
 
         resolvers_dir = base_dir / "plugins" / "resolvers"
         resolvers_dir.mkdir(parents=True, exist_ok=True)
-        for agent_id, resolver_ids in resolver_agent_ids.items():
+
+        if shared_ids:
+            self._write(
+                resolvers_dir / "shared.py",
+                _shared_resolver_stub(shared_ids),
+                result,
+            )
+
+        for agent_id, agent_only_ids in agent_resolver_ids.items():
+            has_shared = agent_id in agents_with_shared
             self._write(
                 resolvers_dir / f"{agent_id}.py",
-                _resolver_stub(agent_id, resolver_ids),
+                _agent_resolver_stub(agent_only_ids, has_shared),
                 result,
             )
 
@@ -46,7 +59,6 @@ class Generator:
         return result
 
     def _write(self, path: Path, content: str, result: GenerateResult) -> None:
-        rel = str(path.relative_to(path.parents[3]) if path.parents[3].name == "plugins" else path)
         if path.exists():
             result.skipped.append(str(path.name))
             return
@@ -56,9 +68,19 @@ class Generator:
 
 def _collect(
     node: GraphNode,
-) -> tuple[dict[str, str], dict[str, list[str]], bool]:
+) -> tuple[dict[str, str], list[str], dict[str, list[str]], set[str], bool]:
+    """Walk the graph and collect:
+    - tool_ids: {id: description}
+    - shared_ids: ordered list of shared resolver IDs (deduped across all agents)
+    - agent_resolver_ids: {agent_id: [agent-scoped resolver ids for that agent]}
+    - agents_with_shared: set of agent IDs that reference at least one shared resolver
+    - has_protected: whether any node is protected
+    """
     tool_ids: dict[str, str] = {}
-    resolver_agent_ids: dict[str, list[str]] = {}
+    shared_ids: list[str] = []
+    seen_shared: set[str] = set()
+    agent_resolver_ids: dict[str, list[str]] = {}
+    agents_with_shared: set[str] = set()
     has_protected = False
 
     def walk(n: GraphNode) -> None:
@@ -68,16 +90,26 @@ def _collect(
         if isinstance(n.node, AgentSpec):
             for t in n.node.tools:
                 tool_ids.setdefault(t.id, t.description)
-            if n.node.resolvers:
-                resolver_agent_ids.setdefault(n.node.id, []).extend(
-                    r.id for r in n.node.resolvers
-                    if r.id not in resolver_agent_ids.get(n.node.id, [])
-                )
+            for r in n.node.resolvers:
+                if r.scope == "shared":
+                    if r.id not in seen_shared:
+                        shared_ids.append(r.id)
+                        seen_shared.add(r.id)
+                    agents_with_shared.add(n.node.id)
+                else:
+                    ids = agent_resolver_ids.setdefault(n.node.id, [])
+                    if r.id not in ids:
+                        ids.append(r.id)
         for child in n.children:
             walk(child)
 
     walk(node)
-    return tool_ids, resolver_agent_ids, has_protected
+
+    # Agents that only have shared resolvers still need a stub file.
+    for agent_id in agents_with_shared:
+        agent_resolver_ids.setdefault(agent_id, [])
+
+    return tool_ids, shared_ids, agent_resolver_ids, agents_with_shared, has_protected
 
 
 def _tool_stub(tool_id: str, description: str) -> str:
@@ -88,19 +120,41 @@ def _tool_stub(tool_id: str, description: str) -> str:
     )
 
 
-def _resolver_stub(agent_id: str, resolver_ids: list[str]) -> str:
+def _shared_resolver_stub(resolver_ids: list[str]) -> str:
     methods = "\n".join(
         f"    def {r_id}(self, ctx: dict) -> str:\n"
         f'        """Returns the value for {{{{{r_id}}}}}"""\n'
         f"        raise NotImplementedError\n"
-        for r_id in dict.fromkeys(resolver_ids)
+        for r_id in resolver_ids
     )
     return (
-        f"class Resolver:\n"
-        f"    def __init__(self) -> None:\n"
-        f"        pass\n\n"
+        "from __future__ import annotations\n\n\n"
+        "class SharedResolver:\n"
+        "    def __init__(self) -> None:\n"
+        "        pass\n\n"
         f"{methods}"
     )
+
+
+def _agent_resolver_stub(agent_only_ids: list[str], inherits_shared: bool) -> str:
+    if inherits_shared:
+        header = "from __future__ import annotations\n\nfrom shared import SharedResolver\n\n\nclass Resolver(SharedResolver):\n"
+        init = "    def __init__(self) -> None:\n        super().__init__()\n"
+    else:
+        header = "from __future__ import annotations\n\n\nclass Resolver:\n"
+        init = "    def __init__(self) -> None:\n        pass\n"
+
+    if agent_only_ids:
+        methods = "\n" + "\n".join(
+            f"    def {r_id}(self, ctx: dict) -> str:\n"
+            f'        """Returns the value for {{{{{r_id}}}}}"""\n'
+            f"        raise NotImplementedError\n"
+            for r_id in agent_only_ids
+        )
+    else:
+        methods = ""
+
+    return f"{header}{init}{methods}"
 
 
 def _access_stub() -> str:
