@@ -1,16 +1,18 @@
-"""Resolver implementation surface for super_agent."""
-
 from __future__ import annotations
 
-from agentplatform.runtime import ExecutionContext
-from plugins.resolvers.base import BaseResolver
+import os
+from datetime import date
 
 
-class SuperAgentResolver(BaseResolver):
-    """Resolver implementation surface for super_agent."""
+class Resolver:
+    def __init__(self) -> None:
+        pass
 
-    def subscription(self, ctx: ExecutionContext) -> str:
-        """Return the current user's subscription tier."""
-        import os
+    def current_date(self, ctx: dict) -> str:
+        return date.today().isoformat()
 
+    def user_name(self, ctx: dict) -> str:
+        return os.environ.get("DEMO_USER_NAME", "Amit")
+
+    def subscription(self, ctx: dict) -> str:
         return os.environ.get("DEMO_SUBSCRIPTION", "Free")

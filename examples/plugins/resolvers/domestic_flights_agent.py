@@ -1,12 +1,15 @@
-"""Resolver implementation surface for domestic_flights_agent."""
-
 from __future__ import annotations
 
-from agentplatform.runtime import ExecutionContext
-from plugins.resolvers.base import BaseResolver
+import os
+from datetime import date
 
 
-class DomesticFlightsAgentResolver(BaseResolver):
-    """Resolver implementation surface for domestic_flights_agent."""
+class Resolver:
+    def __init__(self) -> None:
+        pass
 
-    pass
+    def current_date(self, ctx: dict) -> str:
+        return date.today().isoformat()
+
+    def user_name(self, ctx: dict) -> str:
+        return os.environ.get("DEMO_USER_NAME", "Amit")
