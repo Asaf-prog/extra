@@ -9,6 +9,6 @@ def test_package_imports() -> None:
 
 
 def test_cli_imports() -> None:
-    from agent_engine.cli import cli
+    from agentctl.main import cli
 
     assert cli is not None
