@@ -72,31 +72,35 @@ class LangGraphEngine(Engine):
     ) -> None:
         self._base_dir = base_dir
         self._model_factory = model_factory
+
+        # set during build()
         self._app: CompiledStateGraph | None = None
         self._system_name = ""
         self._filters: list[RouteFilter] = []
         self._mcp_clients: dict[str, Any] = {}
+        self._mcp_tools: dict[str, list[BaseTool]] = {}
+        self._tool_loader: ToolLoader | None = None
+        self._resolver_loader: ResolverLoader | None = None
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     async def build(self, spec: SystemSpec, filters: list[RouteFilter] | None = None) -> None:
         self._system_name = spec.meta.name
-        self._filters = list(filters or [])
 
-        if _has_protected_nodes(spec.graph):
-            access_plugin = self._base_dir / "plugins" / "access.py"
-            if access_plugin.is_file():
-                self._filters.insert(0, AccessFilter(self._base_dir))
+        # 1. filters — access control, feature flags, etc.
+        self._filters = self._setup_filters(spec, filters)
 
-        # Open one MCP client per server, collect tools per server
-        mcp_tools_by_server = await self._connect_mcps(spec.graph)
+        # 2. MCP — connect to servers, collect tools per server
+        self._mcp_tools = await self._connect_mcps(spec)
 
-        tool_loader = ToolLoader(self._base_dir)
-        resolver_loader = ResolverLoader(self._base_dir)
+        # 3. loaders — tools and resolvers from plugins/
+        self._tool_loader = ToolLoader(self._base_dir)
+        self._resolver_loader = ResolverLoader(self._base_dir)
 
-        builder = StateGraph(GraphState)
-        self._add_nodes(builder, spec.graph, tool_loader, resolver_loader, mcp_tools_by_server, parent_path=None)
-        builder.add_edge(START, _node_path(spec.graph, parent_path=None))
-        self._add_edges(builder, spec.graph, parent_path=None)
-        self._app = builder.compile()
+        # 4. compile — build StateGraph from spec tree
+        self._app = self._compile_graph(spec)
 
     async def close(self) -> None:
         for client in self._mcp_clients.values():
@@ -105,17 +109,21 @@ class LangGraphEngine(Engine):
             except Exception:
                 logger.warning("Error closing MCP client", exc_info=True)
         self._mcp_clients.clear()
+        self._mcp_tools.clear()
+
+    # ------------------------------------------------------------------
+    # Execution
+    # ------------------------------------------------------------------
 
     async def run(self, message: str) -> RunResult:
         assert self._app is not None, "call build() before run()"
-        used_tools: list[ToolUsageRecord] = []
-        state: dict[str, Any] = {"message": message, "used_tools": used_tools}
+        state: dict[str, Any] = {"message": message, "used_tools": []}
         result = await self._app.ainvoke(cast(Any, state))
         return RunResult(
             system_name=self._system_name,
             visited=result.get("visited", []),
             answer=result.get("answer", ""),
-            used_tools=tuple(result.get("used_tools", used_tools)),
+            used_tools=tuple(result.get("used_tools", [])),
         )
 
     async def stream(self, message: str) -> AsyncIterator[RunStreamEvent]:
@@ -123,14 +131,13 @@ class LangGraphEngine(Engine):
 
         queue: asyncio.Queue[RunStreamEvent | BaseException | None] = asyncio.Queue()
         loop = asyncio.get_event_loop()
-        used_tools: list[ToolUsageRecord] = []
 
         def put(item: RunStreamEvent) -> None:
             loop.call_soon_threadsafe(queue.put_nowait, item)
 
         state: dict[str, Any] = {
             "message": message,
-            "used_tools": used_tools,
+            "used_tools": [],
             "answer_stream": lambda c: put(RunStreamEvent(type="answer_delta", content=c)),
             "route_stream": lambda r: put(RunStreamEvent(type="route", route=r)),
         }
@@ -143,7 +150,7 @@ class LangGraphEngine(Engine):
                     content=result.get("answer", ""),
                     route=tuple(result.get("visited", [])),
                     system_name=self._system_name,
-                    used_tools=tuple(result.get("used_tools", used_tools)),
+                    used_tools=tuple(result.get("used_tools", [])),
                 ))
             except Exception as exc:
                 queue.put_nowait(exc)
@@ -163,66 +170,72 @@ class LangGraphEngine(Engine):
             await task
 
     # ------------------------------------------------------------------
-    # MCP connection management
+    # Build steps
     # ------------------------------------------------------------------
 
-    async def _connect_mcps(self, graph: GraphNode) -> dict[str, list[BaseTool]]:
-        """Open one MultiServerMCPClient per MCP server, return tools grouped by server id."""
+    def _setup_filters(
+        self,
+        spec: SystemSpec,
+        extra: list[RouteFilter] | None,
+    ) -> list[RouteFilter]:
+        filters = list(extra or [])
+        if _has_protected_nodes(spec.graph):
+            access_plugin = self._base_dir / "plugins" / "access.py"
+            if access_plugin.is_file():
+                filters.insert(0, AccessFilter(self._base_dir))
+        return filters
+
+    async def _connect_mcps(self, spec: SystemSpec) -> dict[str, list[BaseTool]]:
+        """Open one MultiServerMCPClient per server. Return tools grouped by server id."""
         from langchain_mcp_adapters.client import MultiServerMCPClient
 
-        all_mcps = _collect_all_mcps(graph)
-        mcp_tools_by_server: dict[str, list[BaseTool]] = {}
-
-        for server_id, url in all_mcps.items():
+        mcp_tools: dict[str, list[BaseTool]] = {}
+        for server_id, url in _collect_mcp_servers(spec.graph).items():
             client = MultiServerMCPClient({server_id: {"url": url, "transport": "streamable_http"}})
             await client.__aenter__()
             self._mcp_clients[server_id] = client
-            mcp_tools_by_server[server_id] = await client.get_tools()
-            logger.info("MCP server=%s connected, tools=%d", server_id, len(mcp_tools_by_server[server_id]))
+            mcp_tools[server_id] = await client.get_tools()
+            logger.info("MCP server=%s connected, tools=%d", server_id, len(mcp_tools[server_id]))
+        return mcp_tools
 
-        return mcp_tools_by_server
+    def _compile_graph(self, spec: SystemSpec) -> CompiledStateGraph:
+        """Walk the spec tree and wire nodes + edges into a StateGraph."""
+        builder = StateGraph(GraphState)
+        self._wire_node(builder, spec.graph, parent_path=None)
+        builder.add_edge(START, _node_id(spec.graph, parent_path=None))
+        return builder.compile()
 
     # ------------------------------------------------------------------
-    # Graph building helpers
+    # Graph wiring
     # ------------------------------------------------------------------
 
-    def _add_nodes(
+    def _wire_node(
         self,
         builder: StateGraph,
         node: GraphNode,
-        tool_loader: ToolLoader,
-        resolver_loader: ResolverLoader,
-        mcp_tools_by_server: dict[str, list[BaseTool]],
         parent_path: str | None,
     ) -> None:
-        path = _node_path(node, parent_path)
+        path = _node_id(node, parent_path)
+
         if isinstance(node.node, OrchestratorSpec):
             builder.add_node(path, _make_orchestrator_node(path))
         else:
             assert isinstance(node.node, AgentSpec)
-            builder.add_node(
-                path,
-                self._make_agent_node(node.node, path, tool_loader, resolver_loader, mcp_tools_by_server),
-            )
-        for child in node.children:
-            self._add_nodes(builder, child, tool_loader, resolver_loader, mcp_tools_by_server, parent_path=path)
+            builder.add_node(path, self._make_agent_node(node.node, path))
 
-    def _add_edges(self, builder: StateGraph, node: GraphNode, parent_path: str | None) -> None:
-        path = _node_path(node, parent_path)
         if node.children:
-            routes = {_node_path(c, path): _node_path(c, path) for c in node.children}
-            assert isinstance(node.node, OrchestratorSpec)
+            routes = {_node_id(c, path): _node_id(c, path) for c in node.children}
             builder.add_conditional_edges(path, self._make_router(node, path), routes)
             for child in node.children:
-                self._add_edges(builder, child, parent_path=path)
+                self._wire_node(builder, child, parent_path=path)
         else:
             builder.add_edge(path, END)
 
     def _make_router(self, node: GraphNode, node_path: str) -> Callable[[GraphState], str]:
         assert isinstance(node.node, OrchestratorSpec)
         spec = node.node
-        first_child_path = _node_path(node.children[0], node_path)
         children = list(node.children)
+        first_child = _node_id(children[0], node_path)
 
         routing_chain = None
         if spec.model.provider and spec.model.name:
@@ -235,17 +248,12 @@ class LangGraphEngine(Engine):
             candidates = list(children)
             for f in self._filters:
                 candidates = f.filter(ctx, candidates)
-
             if not candidates:
-                return first_child_path
-
+                return first_child
             if routing_chain is not None:
-                orchestrator_prompt = _load_file(self._base_dir, spec.prompts.orchestrator)
-                child_desc = "\n".join(f"- {c.node.id}: {c.node.description}" for c in candidates)
-                system = (
-                    f"{orchestrator_prompt}\n\nAvailable agents:\n{child_desc}\n\n"
-                    "Respond with only the node_id of the best matching agent."
-                )
+                prompt = _load_file(self._base_dir, spec.prompts.orchestrator)
+                descriptions = "\n".join(f"- {c.node.id}: {c.node.description}" for c in candidates)
+                system = f"{prompt}\n\nAvailable agents:\n{descriptions}"
                 try:
                     decision = routing_chain.invoke(
                         [SystemMessage(content=system), HumanMessage(content=state.get("message", ""))]
@@ -253,11 +261,10 @@ class LangGraphEngine(Engine):
                     if isinstance(decision, _RouteDecision):
                         for c in candidates:
                             if c.node.id == decision.next:
-                                return _node_path(c, node_path)
+                                return _node_id(c, node_path)
                 except Exception:
-                    logger.warning("Orchestrator=%s LLM routing failed; using first candidate", node_path)
-
-            return _node_path(candidates[0], node_path)
+                    logger.warning("Orchestrator=%s routing failed; using first candidate", node_path)
+            return _node_id(candidates[0], node_path)
 
         return route
 
@@ -265,20 +272,21 @@ class LangGraphEngine(Engine):
         self,
         spec: AgentSpec,
         node_path: str,
-        tool_loader: ToolLoader,
-        resolver_loader: ResolverLoader,
-        mcp_tools_by_server: dict[str, list[BaseTool]],
     ) -> Callable[[GraphState], dict[str, object]]:
-        tools = self._build_tools(spec, tool_loader, mcp_tools_by_server)
+        assert self._tool_loader is not None
+        assert self._resolver_loader is not None
+
+        tools = self._build_agent_tools(spec)
         model = self._model_factory(spec.model.provider, spec.model.name, spec.model.temperature)
         bound_model = model.bind_tools(tools) if tools else model
         tool_map = {t.name: t for t in tools}
+        resolver_loader = self._resolver_loader
 
         def node(state: GraphState) -> dict[str, object]:
+            # resolve prompt variables
             ctx: dict[str, Any] = {}
             for r in spec.resolvers:
-                fn = resolver_loader.load(spec.id, r.id)
-                ctx[r.id] = str(fn(ctx))
+                ctx[r.id] = str(resolver_loader.load(spec.id, r.id)(ctx))
 
             system_prompt = _render_prompt(
                 _load_file(self._base_dir, spec.prompts.system) or spec.description,
@@ -288,8 +296,9 @@ class LangGraphEngine(Engine):
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=state.get("message", "")),
             ]
+
             route = (*state.get("visited", []), node_path)
-            _stream_route(state, route)
+            _emit_route(state, route)
 
             used_tools: list[ToolUsageRecord] = list(state.get("used_tools", []))
             response = cast(Any, _invoke_model(bound_model, messages, state))
@@ -321,21 +330,14 @@ class LangGraphEngine(Engine):
 
         return node
 
-    def _build_tools(
-        self,
-        spec: AgentSpec,
-        tool_loader: ToolLoader,
-        mcp_tools_by_server: dict[str, list[BaseTool]],
-    ) -> list[BaseTool]:
+    def _build_agent_tools(self, spec: AgentSpec) -> list[BaseTool]:
+        assert self._tool_loader is not None
         tools: list[BaseTool] = []
-
         for t in spec.tools:
-            fn = tool_loader.load(t.id)
+            fn = self._tool_loader.load(t.id)
             tools.append(StructuredTool.from_function(fn, description=t.description))
-
         for mcp in spec.mcps:
-            tools.extend(mcp_tools_by_server.get(mcp.id, []))
-
+            tools.extend(self._mcp_tools.get(mcp.id, []))
         return tools
 
 
@@ -348,7 +350,7 @@ class _RouteDecision(BaseModel):
     next: str
 
 
-def _node_path(node: GraphNode, parent_path: str | None) -> str:
+def _node_id(node: GraphNode, parent_path: str | None) -> str:
     return f"{parent_path}/{node.node.id}" if parent_path else node.node.id
 
 
@@ -384,7 +386,7 @@ def _invoke_model(model: Any, messages: list, state: GraphState) -> Any:
     return streamed or AIMessage(content="")
 
 
-def _stream_route(state: GraphState, route: tuple[str, ...]) -> None:
+def _emit_route(state: GraphState, route: tuple[str, ...]) -> None:
     fn = state.get("route_stream")
     if callable(fn):
         fn(route)
@@ -404,14 +406,14 @@ def _has_protected_nodes(node: GraphNode) -> bool:
     return any(_has_protected_nodes(c) for c in node.children)
 
 
-def _collect_all_mcps(node: GraphNode) -> dict[str, str]:
+def _collect_mcp_servers(node: GraphNode) -> dict[str, str]:
     """Return {server_id: url} for every unique MCP server in the graph."""
     result: dict[str, str] = {}
     if isinstance(node.node, AgentSpec):
         for mcp in node.node.mcps:
             result.setdefault(mcp.id, mcp.url)
     for child in node.children:
-        result.update(_collect_all_mcps(child))
+        result.update(_collect_mcp_servers(child))
     return result
 
 
