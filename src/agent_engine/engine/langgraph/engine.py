@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import logging
 import re
+import threading
 import types
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Coroutine, Iterator
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
+
+_T = TypeVar("_T")
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -103,9 +107,7 @@ class LangGraphEngine(Engine):
     def start(self) -> None:
         if self._mcp_manager is None:
             return
-        from agent_engine.runtime.engine import _EngineAsyncLoop  # reuse existing loop helper
-
-        self._loop = _EngineAsyncLoop()
+        self._loop = _AsyncLoop()
         self._loop.run(self._mcp_manager.start())
 
     def stop(self) -> None:
@@ -434,7 +436,6 @@ def _make_mcp_tool(tool_def: Any, server_id: str, mcp_manager: MCPManager) -> Ba
                 server_id=server_id,
                 tool_name=tool_def.name,
                 arguments=kwargs,
-                ctx=type("Ctx", (), {"request_id": None, "trace_events": [], "add_trace_event": lambda self, e: None})(),
             )
         )
         return str(result)
@@ -442,3 +443,26 @@ def _make_mcp_tool(tool_def: Any, server_id: str, mcp_manager: MCPManager) -> Ba
     mcp_tool.name = tool_def.name
     mcp_tool.description = tool_def.description
     return mcp_tool
+
+
+class _AsyncLoop:
+    """Dedicated event loop on a background thread for async MCP operations."""
+
+    def __init__(self) -> None:
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(
+            target=self._run_forever, name="agent_engine-async-loop", daemon=True
+        )
+        self._thread.start()
+
+    def run(self, coro: Coroutine[Any, Any, _T]) -> _T:
+        return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+
+    def close(self) -> None:
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join()
+        self._loop.close()
+
+    def _run_forever(self) -> None:
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()

@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol
 from urllib.parse import urlparse
 
-from agent_engine.logging_setup import sanitize_url_for_logging
 from agent_engine.runtime.mcp_manager import MCPClientProtocol
 from agent_engine.runtime.tool_models import MCPToolDefinition
 
@@ -63,7 +62,7 @@ class GenericRemoteMCPClient(MCPClientProtocol):
         logger.debug(
             "Initialized remote MCP client server=%s url=%s transport=%s",
             server_id,
-            sanitize_url_for_logging(self.url),
+            self.url,
             self.transport,
         )
 
@@ -74,7 +73,7 @@ class GenericRemoteMCPClient(MCPClientProtocol):
         logger.debug(
             "Connecting remote MCP client server=%s url=%s",
             self.server_id,
-            sanitize_url_for_logging(self.url),
+            self.url,
         )
 
         commands: asyncio.Queue[_ClientCommand] = asyncio.Queue()
