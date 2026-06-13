@@ -41,12 +41,12 @@ def load_file(base_dir: Path, rel_path: str | None) -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
-def invoke_model(model: Any, messages: list, state: GraphState) -> Any:
+async def invoke_model(model: Any, messages: list, state: GraphState) -> Any:
     answer_stream = state.get("answer_stream")
     if not callable(answer_stream):
-        return model.invoke(messages)
+        return await model.ainvoke(messages)
     streamed = None
-    for chunk in model.stream(messages):
+    async for chunk in model.astream(messages):
         streamed = chunk if streamed is None else streamed + chunk
         text = as_text(getattr(chunk, "content", ""))
         if text:
