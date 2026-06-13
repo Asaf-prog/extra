@@ -80,7 +80,7 @@ agents.yml (declarative input specification)
   → Security / Context Gate(protected-node access filtering)
   → Resolver / Sidecar     (dynamic context resolution)
   → Prompt Rendering       (templates rendered per request)
-  → Recursive Execution    (route orchestrators → execute agents)
+  → Supervisor Execution   (orchestrators call children as tools; agents execute)
   → Tool / Data Enforcement(trusted parameters; policy at the tool layer)
   → MCP / Tool Calls       (adapters behind the runtime)
   → Response + Trace
@@ -143,17 +143,20 @@ Responsibilities:
   plugins and/or a client-owned sidecar) — the runtime does not interpret tokens
   or roles itself.
 - **Security / context gate**: filter `protected` nodes via the access plugin so
-  the router never considers nodes the caller may not reach.
-- **Route** from the root node down through orchestrators, using each child's
-  `description` and the orchestrator prompt.
-- **Select** the `AgentNode` to execute.
-- **Resolve dynamic prompt values** by calling the node's declared resolvers.
+  an orchestrator never exposes a child the caller may not reach.
+- **Execute the root node as a supervisor agent**: the orchestrator's children
+  (agents or nested orchestrators) are exposed to it as callable tools; it
+  decides which child tool(s) to call, collects their answers, and synthesises a
+  final response. The whole tree runs inside the root invocation
+  (see [ADR 0009](adr/0009-orchestrators-are-supervisor-agents.md)).
+- **Resolve dynamic prompt values** by calling each node's declared resolvers.
 - **Render prompt templates** for this request (strict; missing variables fail).
-- **Execute** the selected agent (or continue routing through an orchestrator).
+- **Execute leaf agents** with only their declared tools bound.
 - **Enforce tool/data policy**: expose only the agent's declared tools; pass
   trusted, runtime-controlled context to tools (see §11).
 - **Call tools / MCP servers** through runtime-managed adapters.
-- **Return** the response plus a structured trace.
+- **Return** the response plus a structured trace (`visited` = call-chain;
+  `used_tools` = real tool/MCP calls, merged up from nested agents).
 
 ---
 
@@ -516,9 +519,12 @@ Compiles validated spec into an immutable `CompiledAgentGraph` with resolved
 node declarations, stable node paths, and model/resolver/tool/MCP bindings.
 
 **Runtime engine (0004 — ✅ done):**
-`Engine` wraps compile + LangGraph build. `ExecutionContext` is per-request.
-LangGraph-based routing: orchestrators route via LLM structured output; agents
-execute with tools bound. Tool-call loop runs until the model stops.
+`LangGraphEngine` wraps compile + LangGraph build behind an async context
+manager (`build()` / `close()`); per-request state flows as `GraphState`.
+Orchestrators are **supervisor agents** — children are exposed as tools and the
+orchestrator synthesises the answer; the compiled graph is flat
+(`START → root → END`). Both orchestrators and agents run a tool-call loop until
+the model stops (see [ADR 0009](adr/0009-orchestrators-are-supervisor-agents.md)).
 
 **Prompt rendering (0005 — 🔶 partial):**
 Prompt files are loaded from disk and `{{ variable }}` placeholders are
@@ -528,12 +534,18 @@ parsed-template cache, or strict missing-variable errors yet.
 **Resolver plugins (0006 — 🔶 partial, resolver side done):**
 Full resolver plugin system: TOML-configured `BaseResolver` + per-agent
 subclasses, shared/agent-scoped resolvers, dynamic loading, generation modes
-(`--mode all/children/child`), overwrite protection, stale detection. Access
-plugin not yet wired into routing.
+(`--mode all/children/child`), overwrite protection, stale detection. The access
+plugin **is** wired: an `AccessFilter` removes protected children before they are
+exposed as orchestrator tools. Populating the request context it filters on (the
+Security/Context Gate) is not yet implemented, so it currently filters on an
+empty context.
 
-**Tool plugins (0007 — 🔶 partial):**
-Python plugin tools load from `plugins/tools/`, are bound per-agent, and
-execute in a tool-call loop. MCP client not implemented.
+**Tool plugins & MCP (0007 — 🔶 partial):**
+Python plugin tools load from `plugins/tools/`, are bound per-agent, and execute
+in a tool-call loop. MCP servers connect via `langchain-mcp-adapters`
+(`MultiServerMCPClient`), discovering tools at build time; unreachable servers
+are logged as a warning and skipped. Per-tool input policy is not yet
+implemented.
 
 **CLI (0008 — 🔶 partial):**
 `agentctl validate`, `agentctl generate` (with `--mode`, `--agent`, `--force`),

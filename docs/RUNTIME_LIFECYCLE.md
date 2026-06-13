@@ -27,27 +27,32 @@ read-only, across all requests. Expensive setup (parsing the graph, preparing
 provider clients, loading and parsing prompt templates, opening MCP connections)
 happens here — not on the request path.
 
-MCP connections are explicit lifecycle work: `Engine.start()` asks the
-engine-owned `MCPManager` to create one generic URL-based remote MCP client per
-configured MCP server, initialize the sessions, and cache discovered tool
-metadata. `Engine.stop()` closes those clients. `Engine.run()` does not
-implicitly start MCP clients.
+The engine is driven through an **async context manager**. `build(spec)`
+performs the one-time setup — connecting to MCP servers (one
+`MultiServerMCPClient` per configured server via `langchain-mcp-adapters`),
+discovering their tools, loading tool/resolver plugins, and compiling the graph.
+Unreachable MCP servers are logged as a warning and skipped, so local tools keep
+working. `close()` (called on context exit) releases those resources.
 
-MCP transports may keep async resources such as AnyIO task groups open between
-startup and shutdown. The engine therefore keeps MCP start, tool calls, and stop
-on the same long-lived async loop instead of opening clients with one
-`asyncio.run(...)` call and closing them with another.
+```python
+async with LangGraphEngine(base_dir) as engine:
+    await engine.build(spec)
+    result = await engine.run(message)
+```
+
+Keeping `build`, runs, and `close` inside one `async with` keeps MCP clients and
+their async resources (e.g. AnyIO task groups) on a single long-lived loop.
 
 ### Per request (many)
 
 ```
 request arrives
-  → create ExecutionContext(request_id, request data, trace)
-  → filter protected nodes through access plugin
-  → route through graph
+  → create per-request state (message, trace)
+  → filter protected nodes through access plugin (per orchestrator)
+  → execute root as a supervisor agent (children exposed as tools)
   → resolve prompt variables through resolver plugins
   → render prompts (per request)
-  → execute orchestrator/agent
+  → orchestrators synthesise; leaf agents execute their tools
   → call configured tool plugins/MCP servers as needed
   → finalize response + trace
 ```
@@ -67,15 +72,18 @@ graph and yields platform-level `RunStreamEvent` values such as
 LangChain-specific chunks. The final event preserves the completed answer,
 route, system name, and runtime-generated tool usage summary.
 
-Streaming does not own lifecycle. Applications still call:
+**Only the root orchestrator streams its answer to the user.** Inner agents and
+nested orchestrators run silently — their tokens are not emitted as
+`answer_delta`, so the stream reflects the final synthesised answer, not the
+intermediate reasoning of children.
+
+Streaming uses the same async-context lifecycle:
 
 ```python
-engine.start()
-try:
-    for event in engine.stream(message):
+async with LangGraphEngine(base_dir) as engine:
+    await engine.build(spec)
+    async for event in engine.stream(message):
         ...
-finally:
-    engine.stop()
 ```
 
 `agentctl run --stream` uses this flow and writes `answer_delta` content to

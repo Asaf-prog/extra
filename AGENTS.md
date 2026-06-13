@@ -16,9 +16,12 @@ runtime that renders prompt files, calls resolver/tool plugins and MCP servers,
 exposes an API, and produces execution traces.
 
 The repository is in **active development**. The YAML validator, compiler,
-runtime engine, resolver plugin system, tool plugin loading, prompt rendering,
-and CLI are implemented. The access plugin, MCP client, API server, deployment,
-and observability are not yet implemented. See [docs/ROADMAP.md](docs/ROADMAP.md)
+runtime engine (orchestrators run as supervisor agents — see
+[ADR 0009](docs/adr/0009-orchestrators-are-supervisor-agents.md)), resolver
+plugin system, tool plugin loading, MCP client, prompt rendering, and CLI are
+implemented. The access plugin is wired into child filtering but the
+request-context gate that feeds it, the API server, deployment, and
+observability are not yet implemented. See [docs/ROADMAP.md](docs/ROADMAP.md)
 for per-phase status. Agents implement the product task-by-task using the files
 in `tasks/`.
 
@@ -44,10 +47,10 @@ Incoming request
   → Security/Context Gate
   → RuntimeEngine
   → filter protected nodes through access plugin
-  → route through graph
+  → execute root as a supervisor agent (children exposed as tools)
   → resolve prompt variables through resolver plugins
   → render prompts
-  → execute selected orchestrator/agent
+  → orchestrators synthesise; leaf agents execute their tools
   → call configured tools/MCP as needed
   → return response + trace
 ```

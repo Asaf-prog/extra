@@ -1,9 +1,8 @@
 # MCP & Tools
 
 This document defines how executor agents use Python plugin tools and MCP
-servers. Python plugin tools, the generic tool-runtime boundary, a generic
-URL-based remote MCP client, and LangGraph/LangChain binding for discovered MCP
-tools are implemented.
+servers. Python plugin tools, remote MCP connection via `langchain-mcp-adapters`,
+and LangChain binding of both as the model's tools are implemented.
 
 ---
 
@@ -23,10 +22,10 @@ agents:
 ```
 
 MCP servers may be implemented in any language. Users only declare the server
-URL in YAML; they do not write MCP client classes. At startup, `Engine.start()`
-asks `MCPManager` to create one `GenericRemoteMCPClient` per configured MCP
-server URL, connect and initialize the MCP session, discover tools, and cache
-the discovered metadata.
+URL in YAML; they do not write MCP client classes. During `build()`, the engine
+creates one `MultiServerMCPClient` (from `langchain-mcp-adapters`) per configured
+server, connects, and discovers its tools via `get_tools()`. A server that is
+unreachable is logged as a warning and skipped, so local tools keep working.
 
 The default remote transport is the official MCP Streamable HTTP transport.
 The YAML contract remains URL-based; local process / stdio MCP servers are not
@@ -68,57 +67,39 @@ the model stops requesting tools.
 
 ## Runtime Tool Boundary
 
-The runtime-facing abstraction is `ToolRegistry`. It exposes model-facing
-`RuntimeTool` metadata:
+Both local plugin tools and MCP tools are presented to the model as LangChain
+tools, so the model cannot tell where a tool came from. The engine assembles an
+agent's tools at **build time** (`_build_agent_tools`):
 
-- `name`
-- `description`
-- `parameters_schema`
+- each declared local tool is loaded from `plugins/tools/{id}.py` and wrapped as
+  a `StructuredTool`;
+- MCP tools come only from the servers listed in the agent's `mcps`, taken from
+  the `MultiServerMCPClient.get_tools()` results discovered during `build()`.
 
-The model-facing metadata intentionally hides whether a tool came from a local
-Python plugin or an MCP server. Internal routing metadata stays in
-`RuntimeToolBinding`, `ToolRegistry`, `MCPToolProvider`, and `MCPManager`.
+Both are bound to the agent's model; the tool-call loop runs until the model
+stops requesting tools. Each call is recorded in the run's `used_tools` with its
+`provider` (`"local"` or `"mcp"`), so the origin is tracked for tracing even
+though it is hidden from the model.
 
-MCP-backed `RuntimeTool` values are adapted into executable LangChain tools at
-agent-node execution time, when the per-request `ExecutionContext` exists. Tool
-calls made by the model flow through:
+The engine is driven as an async context manager: `build()` connects MCP servers
+and discovers tools; `close()` (on context exit) releases them. `run()` does not
+connect MCP servers on its own — `build()` must run first.
 
-```text
-LLM tool call
-  → LangChain tool adapter
-  → ToolRegistry.call_tool(agent_id, tool_name, arguments, ctx)
-  → MCPToolProvider
-  → MCPManager
-  → GenericRemoteMCPClient
-  → remote MCP server
+```python
+async with LangGraphEngine(base_dir) as engine:
+    await engine.build(spec)   # connects MCP servers, discovers tools
+    result = await engine.run(message)
 ```
-
-LangGraph nodes do not call `MCPManager` or `GenericRemoteMCPClient` directly.
-The current agent-node tool loop is synchronous, so the LangChain adapter owns
-the sync-to-async bridge into `ToolRegistry.call_tool`. Async-native graph
-execution can replace that bridge in a later lifecycle task.
-
-Per-agent access is enforced from declarations:
-
-- local tools come from the selected agent's `tools`;
-- MCP tools come only from servers listed in the selected agent's `mcps`;
-- duplicate runtime tool names fail clearly.
-
-`ExecutionContext` does not own MCP connections. `Engine` owns one `MCPManager`
-and one `ToolRegistry`; `MCPManager` owns the long-lived MCP clients.
-
-`Engine.start()` and `Engine.stop()` are the lifecycle hooks for MCP
-connections. `Engine.run()` does not auto-start MCP clients; callers that need
-MCP tools, including `agentctl run`, call `start()` before `run()` and `stop()`
-in a `finally` block.
 
 ## Runtime Tool Usage Summary
 
-`agentctl run` prints a deterministic tool usage section after each run. The
-records are collected by the runtime tool execution path, not inferred from the
-final answer and not requested from the model.
+Every run collects deterministic tool-usage records (`RunResult.used_tools`) on
+the runtime tool-execution path — in call order, not inferred from the final
+answer or requested from the model. Records from tools called by nested agents
+are merged up into the top-level result.
 
-Example:
+Rendering these records in `agentctl run` is ⏳ **planned** (not yet wired into
+the CLI output). The intended format:
 
 ```text
 tools used:
@@ -178,11 +159,13 @@ For the MVP:
 - validate that every agent MCP id exists in top-level `mcps` (✅ implemented);
 - load tool plugins from `plugins/tools/{tool_id}.py` (✅ implemented);
 - bind only the agent's declared tools per node (✅ implemented);
-- pass request context through `ctx` (✅ implemented);
-- create generic URL-based remote MCP clients from `mcps.<id>.url` (✅ implemented);
-- discover and cache remote MCP tool metadata on `Engine.start()` (✅ implemented);
-- hide local-vs-MCP origin behind `ToolRegistry` and `RuntimeTool` (✅ implemented);
+- create remote MCP clients from `mcps.<id>.url` via `langchain-mcp-adapters` (✅ implemented);
+- discover MCP tool metadata during `build()` (✅ implemented);
+- hide local-vs-MCP origin by presenting both as LangChain tools, while tracking
+  the origin in `used_tools.provider` (✅ implemented);
 - bind discovered MCP tools into LangGraph/LangChain tool-calling (✅ implemented);
+- pass trusted request context through `ctx` into tool calls (⏳ planned —
+  resolvers receive `ctx`, tools do not yet);
 - redact secrets from traces (⏳ planned, task 0011);
 - keep prompt wording out of the enforcement path.
 
@@ -213,36 +196,37 @@ mcps:
 The `deepwiki_agent` declares `mcps: [deepwiki]`, so its model may call tools
 discovered from the DeepWiki MCP server. There is no stdio configuration,
 command/args, authentication, custom client code, or DeepWiki-specific client
-class. The generic URL-based MCP client handles connection and discovery during
-`Engine.start()`.
+class. The MCP client handles connection and discovery during `build()`.
 
 Validate the example offline, without contacting DeepWiki:
 
 ```bash
-poetry run python -m agentplatform.cli.main validate examples/deepwiki_mcp_agents.yml
+agentctl validate --config examples/deepwiki_mcp_agents.yml
 ```
 
 Run the manual smoke test when provider dependencies and credentials are
 available:
 
 ```bash
-poetry run python -m agentplatform.cli.main run examples/deepwiki_mcp_agents.yml "Use DeepWiki to ask what the public GitHub repository modelcontextprotocol/python-sdk is about"
+agentctl run --config examples/deepwiki_mcp_agents.yml \
+  --message "Use DeepWiki to ask what the public GitHub repository modelcontextprotocol/python-sdk is about"
 ```
 
 To stream the final assistant answer as it is generated, add `--stream`:
 
 ```bash
-poetry run python -m agentplatform.cli.main run examples/deepwiki_mcp_agents.yml --stream "Use DeepWiki to explain what the public GitHub repository modelcontextprotocol/python-sdk is about."
+agentctl run --config examples/deepwiki_mcp_agents.yml --stream \
+  --message "Use DeepWiki to explain what the public GitHub repository modelcontextprotocol/python-sdk is about."
 ```
 
-Additional useful prompts:
+Additional useful prompts (pass each via `--message`):
 
 ```bash
-poetry run python -m agentplatform.cli.main run examples/deepwiki_mcp_agents.yml "Use DeepWiki to inspect the wiki structure for modelcontextprotocol/python-sdk."
+agentctl run --config examples/deepwiki_mcp_agents.yml \
+  --message "Use DeepWiki to inspect the wiki structure for modelcontextprotocol/python-sdk."
 
-poetry run python -m agentplatform.cli.main run examples/deepwiki_mcp_agents.yml "Use DeepWiki to explain the main modules in langchain-ai/langchain."
-
-poetry run python -m agentplatform.cli.main run examples/deepwiki_mcp_agents.yml "Use DeepWiki to find where tool calling is implemented in modelcontextprotocol/python-sdk."
+agentctl run --config examples/deepwiki_mcp_agents.yml \
+  --message "Use DeepWiki to explain the main modules in langchain-ai/langchain."
 ```
 
 The current sample model uses Anthropic via LangChain, so install the optional

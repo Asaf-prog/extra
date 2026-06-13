@@ -132,9 +132,10 @@ mcps:
     url: "https://company.com/mcp/flights"
 ```
 
-The platform creates a generic remote MCP client for each configured URL during
-`Engine.start()`. Users do not implement MCP client classes, and stdio/local
-process MCP servers are not part of the current YAML contract.
+The platform creates a remote MCP client for each configured URL during engine
+`build()` (via `langchain-mcp-adapters`). Users do not implement MCP client
+classes, and stdio/local process MCP servers are not part of the current YAML
+contract.
 
 ---
 

@@ -3,9 +3,11 @@
 This directory contains the design and architecture documentation for the
 Declarative Agent Platform. It is the source of truth for **how the system is
 meant to work**. The core pipeline (validate → compile → runtime → prompts →
-resolver plugins → tool plugins → CLI) is implemented; remaining layers (access
-plugin, MCP client, API server, deployment, observability) are documented as
-design contracts for future implementation.
+resolver plugins → tool plugins → MCP → CLI) is implemented, with orchestrators
+running as supervisor agents. The access plugin is wired into child filtering but
+the request-context gate that feeds it is not; the API server, deployment, and
+observability layers are documented as design contracts for future
+implementation.
 
 ## Reading order
 
@@ -30,6 +32,8 @@ codebase. Read them before changing anything they cover:
 - [0005 — Prompt templates are rendered per request using resolved context](adr/0005-prompt-rendering-and-context-resolution.md)
 - [0006 — Reusable node declarations and agent nodes](adr/0006-reusable-agent-definitions-and-hierarchy-instances.md)
 - [0007 — Build/compile phase is separate from the runtime/execution phase](adr/0007-build-phase-separate-from-runtime-phase.md)
+- [0008 — Model access via init_chat_model](adr/0008-model-access-via-langchain-init-chat-model.md)
+- [0009 — Orchestrators are supervisor agents (children exposed as tools)](adr/0009-orchestrators-are-supervisor-agents.md)
 
 ## Relationship to other directories
 
