@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
 import re
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 from agent_engine.core.spec import AgentSpec, GraphNode
 from agent_engine.runtime.state import GraphState
+
+logger = logging.getLogger(__name__)
 
 
 def node_id(node: GraphNode, parent_path: str | None) -> str:
@@ -27,7 +31,7 @@ def load_file(base_dir: Path, rel_path: str | None) -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
-async def invoke_model(model: Any, messages: list, state: GraphState) -> Any:
+async def invoke_model(model: Any, messages: list[Any], state: GraphState) -> Any:
     answer_stream = state.get("answer_stream")
     if not callable(answer_stream):
         return await model.ainvoke(messages)
@@ -38,6 +42,32 @@ async def invoke_model(model: Any, messages: list, state: GraphState) -> Any:
         if text:
             answer_stream(text)
     return streamed or AIMessage(content="")
+
+
+async def run_tool_loop(
+    model: Any,
+    messages: list[Any],
+    state: GraphState,
+    node_path: str,
+    invoke_tool: Callable[[dict[str, Any]], Awaitable[str]],
+) -> Any:
+    """Drive the model → tools → model loop until the model stops calling tools.
+
+    ``invoke_tool`` executes one tool call and returns its result as text. Each
+    caller supplies its own: an agent runs real/MCP tools, an orchestrator runs
+    child agents exposed as tools. The final (tool-call-free) model response is
+    returned.
+    """
+    response = await invoke_model(model, messages, state)
+    while getattr(response, "tool_calls", None):
+        messages.append(response)
+        for tc in response.tool_calls:
+            logger.debug("[%s] ← tool_call: %s(%s)", node_path, tc["name"], tc["args"])
+            content = await invoke_tool(tc)
+            logger.debug("[%s] → tool_result[%s]: %s", node_path, tc["name"], content[:300])
+            messages.append(ToolMessage(content=content, tool_call_id=tc["id"]))
+        response = await invoke_model(model, messages, state)
+    return response
 
 
 def emit_route(state: GraphState, route: tuple[str, ...]) -> None:

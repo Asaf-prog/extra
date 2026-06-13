@@ -19,7 +19,7 @@ from agent_engine.engine.langgraph.helpers import (
     has_protected_nodes,
     node_id,
 )
-from agent_engine.engine.langgraph.nodes import AgentNode, OrchestratorNode
+from agent_engine.engine.langgraph.nodes import AgentNode, ChildEntry, OrchestratorNode
 from agent_engine.engine.types import RunResult
 from agent_engine.loaders.resolver_loader import ResolverLoader
 from agent_engine.loaders.tool_loader import ToolLoader
@@ -63,11 +63,11 @@ class LangGraphEngine(Engine):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def build(self, spec: SystemSpec, filters: list[RouteFilter] | None = None) -> None:
+    async def build(self, spec: SystemSpec) -> None:
         self._system_name = spec.meta.name
 
         # 1. filters — access control, feature flags, etc.
-        self._filters = self._setup_filters(spec, filters)
+        self._filters = self._setup_filters(spec)
 
         # 2. MCP — connect to servers, collect tools per server
         self._mcp_tools = await self._connect_mcps(spec)
@@ -87,10 +87,24 @@ class LangGraphEngine(Engine):
     # Execution
     # ------------------------------------------------------------------
 
+    def _new_state(
+        self,
+        message: str,
+        *,
+        answer_stream: Callable[[str], None] | None = None,
+        route_stream: Callable[[tuple[str, ...]], None] | None = None,
+    ) -> dict[str, Any]:
+        """Build the initial per-request state. Stream callbacks are optional."""
+        state: dict[str, Any] = {"message": message, "used_tools": []}
+        if answer_stream is not None:
+            state["answer_stream"] = answer_stream
+        if route_stream is not None:
+            state["route_stream"] = route_stream
+        return state
+
     async def run(self, message: str) -> RunResult:
         assert self._app is not None, "call build() before run()"
-        state: dict[str, Any] = {"message": message, "used_tools": []}
-        result = await self._app.ainvoke(cast(Any, state))
+        result = await self._app.ainvoke(cast(Any, self._new_state(message)))
         return RunResult(
             system_name=self._system_name,
             visited=result.get("visited", []),
@@ -102,15 +116,13 @@ class LangGraphEngine(Engine):
         assert self._app is not None, "call build() before stream()"
 
         queue: asyncio.Queue[RunStreamEvent | BaseException | None] = asyncio.Queue()
-
-        state: dict[str, Any] = {
-            "message": message,
-            "used_tools": [],
-            "answer_stream": lambda c: queue.put_nowait(
+        state = self._new_state(
+            message,
+            answer_stream=lambda c: queue.put_nowait(
                 RunStreamEvent(type="answer_delta", content=c)
             ),
-            "route_stream": lambda r: queue.put_nowait(RunStreamEvent(type="route", route=r)),
-        }
+            route_stream=lambda r: queue.put_nowait(RunStreamEvent(type="route", route=r)),
+        )
 
         async def run_graph() -> None:
             try:
@@ -143,16 +155,12 @@ class LangGraphEngine(Engine):
     # Build steps
     # ------------------------------------------------------------------
 
-    def _setup_filters(
-        self,
-        spec: SystemSpec,
-        extra: list[RouteFilter] | None,
-    ) -> list[RouteFilter]:
-        filters = list(extra or [])
+    def _setup_filters(self, spec: SystemSpec) -> list[RouteFilter]:
+        filters: list[RouteFilter] = []
         if has_protected_nodes(spec.graph):
             access_plugin = self._base_dir / "plugins" / "access.py"
             if access_plugin.is_file():
-                filters.insert(0, AccessFilter(self._base_dir))
+                filters.append(AccessFilter(self._base_dir))
         return filters
 
     async def _connect_mcps(self, spec: SystemSpec) -> dict[str, list[BaseTool]]:
@@ -221,20 +229,27 @@ class LangGraphEngine(Engine):
         path = node_id(node, parent_path)
         model = self._model_factory(spec.model.provider, spec.model.name, spec.model.temperature)
 
-        child_nodes: list[tuple[GraphNode, Any]] = []
+        children: list[ChildEntry] = []
         for child in node.children:
             callable_node: AgentNode | OrchestratorNode
             if isinstance(child.node, AgentSpec):
                 callable_node = self._build_agent_node(child.node, node_id(child, path))
             else:
                 callable_node = self._build_orchestrator_node(child, path)
-            child_nodes.append((child, callable_node))
+            children.append(
+                ChildEntry(
+                    id=child.node.id,
+                    name=child.node.name or child.node.id,
+                    protected=child.node.protected,
+                    callable=callable_node,
+                )
+            )
 
         return OrchestratorNode(
             spec=spec,
             node_path=path,
             model=model,
-            child_nodes=child_nodes,
+            children=children,
             filters=self._filters,
             base_dir=self._base_dir,
         )

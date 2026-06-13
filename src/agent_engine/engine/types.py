@@ -1,38 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Literal
 
-
-class MessageRole(Enum):
-    user = "user"
-    assistant = "assistant"
-    tool = "tool"
-
-
-@dataclass(frozen=True)
-class Message:
-    role: MessageRole
-    content: str
-
-
-ToolUsageStatus = Literal["started", "succeeded", "failed"]
-ToolProviderName = Literal["local", "mcp", "unknown"]
-
-
-@dataclass(frozen=True)
-class ToolUsageRecord:
-    name: str
-    provider: ToolProviderName
-    status: ToolUsageStatus
-    agent_id: str
-    server_id: str | None = None
-    error: str | None = None
+from agent_engine.runtime.tool_models import ToolUsageRecord
 
 
 @dataclass(frozen=True)
 class RunResult:
+    """The outcome of one completed run: the route taken, the answer, and the
+    tools observed along the way."""
+
     system_name: str
     visited: list[str]
     answer: str

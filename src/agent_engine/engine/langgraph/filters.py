@@ -3,9 +3,25 @@ from __future__ import annotations
 import importlib.util
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, TypeVar
 
-from agent_engine.core.spec import GraphNode
+
+class Filterable(Protocol):
+    """The minimal view a RouteFilter needs of a routing candidate.
+
+    Decouples filters from the spec layer (``GraphNode``) and the runtime layer
+    (node callables): a filter only ever inspects a candidate's id and whether
+    it is protected. Declared read-only so frozen dataclasses satisfy it.
+    """
+
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def protected(self) -> bool: ...
+
+
+T = TypeVar("T", bound=Filterable)
 
 
 class RouteFilter(ABC):
@@ -17,7 +33,7 @@ class RouteFilter(ABC):
     """
 
     @abstractmethod
-    def filter(self, ctx: dict[str, Any], candidates: list[GraphNode]) -> list[GraphNode]: ...
+    def filter(self, ctx: dict[str, Any], candidates: list[T]) -> list[T]: ...
 
 
 class AccessFilter(RouteFilter):
@@ -26,10 +42,10 @@ class AccessFilter(RouteFilter):
     def __init__(self, base_dir: Path) -> None:
         self._resolver = _load_access_resolver(base_dir)
 
-    def filter(self, ctx: dict[str, Any], candidates: list[GraphNode]) -> list[GraphNode]:
+    def filter(self, ctx: dict[str, Any], candidates: list[T]) -> list[T]:
         return [
-            n for n in candidates
-            if not n.node.protected or self._resolver.can_access(ctx, n.node.id)
+            c for c in candidates
+            if not c.protected or self._resolver.can_access(ctx, c.id)
         ]
 
 

@@ -1,26 +1,27 @@
 """LangGraph node callables.
 
-``AgentNode``       — runs a single agent: resolve context → build prompt → tool loop.
+``AgentNode``        — runs a single agent: resolve context → build prompt → tool loop.
 ``OrchestratorNode`` — supervisor agent that calls child agents as tools and synthesizes.
 """
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
 
-from agent_engine.core.spec import AgentSpec, GraphNode, OrchestratorSpec
+from agent_engine.core.spec import AgentSpec, OrchestratorSpec
 from agent_engine.engine.langgraph.filters import RouteFilter
 from agent_engine.engine.langgraph.helpers import (
     as_text,
     emit_route,
-    invoke_model,
     load_file,
     render_prompt,
+    run_tool_loop,
 )
 from agent_engine.loaders.resolver_loader import ResolverLoader
 from agent_engine.runtime.state import GraphState
@@ -43,6 +44,21 @@ _ORCHESTRATOR_CONTRACT = """
 # Input schema for child-agent tools exposed to the orchestrator LLM
 class _AgentCall(BaseModel):
     message: str
+
+
+@dataclass(frozen=True)
+class ChildEntry:
+    """A child node ready to be exposed as a tool by its parent orchestrator.
+
+    Decoupled from the spec layer (``GraphNode``): the orchestrator only needs
+    the child's identity, a human-readable description, its protection flag (for
+    access filtering), and the runtime callable to invoke.
+    """
+
+    id: str
+    name: str
+    protected: bool
+    callable: AgentNode | OrchestratorNode
 
 
 class AgentNode:
@@ -106,39 +122,24 @@ class AgentNode:
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_msg),
         ]
-
         logger.debug("[%s] system:\n%s", self._node_path, system_prompt)
         logger.debug("[%s] → user: %s", self._node_path, user_msg)
 
-        route = (*state.get("visited", []), self._node_path)
-        emit_route(state, route)
+        visited: list[str] = [*state.get("visited", []), self._node_path]
+        emit_route(state, tuple(visited))
 
         used_tools: list[ToolUsageRecord] = list(state.get("used_tools", []))
-        response = cast(Any, await invoke_model(self._bound_model, messages, state))
 
-        while getattr(response, "tool_calls", None):
-            messages.append(response)
-            for tc in response.tool_calls:
-                logger.debug(
-                    "[%s] ← tool_call: %s(%s)",
-                    self._node_path, tc["name"], tc["args"],
-                )
-                content = await self._invoke_tool(tc, used_tools)
-                logger.debug(
-                    "[%s] → tool_result[%s]: %s",
-                    self._node_path, tc["name"], content[:300],
-                )
-                messages.append(ToolMessage(content=content, tool_call_id=tc["id"]))
-            response = cast(Any, await invoke_model(self._bound_model, messages, state))
+        async def invoke_tool(tc: dict[str, Any]) -> str:
+            return await self._invoke_tool(tc, used_tools)
 
+        response = await run_tool_loop(
+            self._bound_model, messages, state, self._node_path, invoke_tool
+        )
         answer = as_text(response.content)
         logger.debug("[%s] ← response: %s", self._node_path, answer[:300])
 
-        return {
-            "visited": list(route),
-            "answer": answer,
-            "used_tools": used_tools,
-        }
+        return {"visited": visited, "answer": answer, "used_tools": used_tools}
 
     async def _invoke_tool(self, tc: dict[str, Any], used_tools: list[ToolUsageRecord]) -> str:
         """Call one tool and append a usage record. Returns the tool result as text.
@@ -147,7 +148,10 @@ class AgentNode:
         failure message and recover or report it gracefully.
         """
         name: str = tc["name"]
-        tool = self._tool_map[name]
+        tool = self._tool_map.get(name)
+        if tool is None:
+            return f"Unknown tool: {name}"
+
         provider: ToolProviderName = "mcp" if name in self._mcp_tool_names else "local"
         try:
             result = await tool.ainvoke(tc["args"])
@@ -190,14 +194,14 @@ class OrchestratorNode:
         spec: OrchestratorSpec,
         node_path: str,
         model: Any,
-        child_nodes: list[tuple[GraphNode, Any]],  # (GraphNode, AgentNode | OrchestratorNode)
+        children: list[ChildEntry],
         filters: list[RouteFilter],
         base_dir: Path,
     ) -> None:
         self._spec = spec
         self._node_path = node_path
         self._model = model
-        self._child_nodes = child_nodes
+        self._children = children
         self._filters = filters
         self._base_dir = base_dir
 
@@ -215,127 +219,96 @@ class OrchestratorNode:
     # Steps
     # ------------------------------------------------------------------
 
-    def _filter_children(self, state: GraphState) -> list[tuple[GraphNode, Any]]:
+    def _filter_children(self, state: GraphState) -> list[ChildEntry]:
         """Apply every RouteFilter to narrow down which child tools are available."""
         ctx: dict[str, Any] = cast(dict[str, Any], state.get("run_context", {}))
-        candidates = list(self._child_nodes)
+        candidates = list(self._children)
         for f in self._filters:
-            allowed = {gn.node.id for gn in f.filter(ctx, [gn for gn, _ in candidates])}
-            candidates = [(gn, fn) for gn, fn in candidates if gn.node.id in allowed]
+            candidates = f.filter(ctx, candidates)
         return candidates
 
     def _make_tool(
         self,
-        graph_node: GraphNode,
-        callable_node: Any,
+        entry: ChildEntry,
         parent_state: GraphState,
         visited_acc: list[str],
+        used_tools_acc: list[ToolUsageRecord],
     ) -> StructuredTool:
         """Wrap a child node as a StructuredTool the orchestrator LLM can call.
 
-        ``visited_acc`` is the parent's live visited list. When the child runs it
-        adds its own path (and its children's paths) to its result; we merge those
-        additions back so the full call-chain is visible in the final route.
+        ``visited_acc`` and ``used_tools_acc`` are the parent's live trace lists.
+        When the child returns we merge its new path segments and the tools it
+        used back into them, so the final route and tool trace reflect the whole
+        call-chain — not just the orchestrator's own step.
         """
         async def invoke(message: str) -> str:
             snapshot = list(visited_acc)
+            # Children never stream their answer to the user — only the root
+            # orchestrator's final synthesis does. `route_stream` is propagated so
+            # the live route still reflects the full call-chain.
             sub_state: dict[str, Any] = {
                 "message": message,
                 "visited": snapshot,
                 "used_tools": [],
-                "answer_stream": parent_state.get("answer_stream"),
                 "route_stream": parent_state.get("route_stream"),
                 "run_context": parent_state.get("run_context", {}),
             }
-            result = await callable_node(sub_state)
-            # Merge new paths the child introduced beyond the snapshot
-            for path in result.get("visited", [])[len(snapshot):]:
+            try:
+                result = await entry.callable(cast(GraphState, sub_state))
+            except Exception as exc:
+                return f"Agent error: {exc}"
+
+            child_visited = cast("list[str]", result.get("visited", []))
+            child_tools = cast("list[ToolUsageRecord]", result.get("used_tools", []))
+            for path in child_visited[len(snapshot):]:
                 visited_acc.append(path)
-            return result.get("answer", "")
+            used_tools_acc.extend(child_tools)
+            return cast(str, result.get("answer", ""))
 
         return StructuredTool.from_function(
             coroutine=invoke,
-            name=graph_node.node.id,
-            description=graph_node.node.name or graph_node.node.id,
+            name=entry.id,
+            description=entry.name,
             args_schema=_AgentCall,
         )
 
     async def _run(
         self,
         system_prompt: str,
-        candidates: list[tuple[GraphNode, Any]],
+        candidates: list[ChildEntry],
         state: GraphState,
     ) -> dict[str, object]:
         """Drive the orchestrator LLM tool loop and return the synthesised answer."""
         visited: list[str] = [*state.get("visited", []), self._node_path]
         used_tools: list[ToolUsageRecord] = list(state.get("used_tools", []))
 
-        # Build tools here so they share the live `visited` list
-        tools = [self._make_tool(gn, fn, state, visited) for gn, fn in candidates]
+        # Build tools here so they share the live `visited` / `used_tools` lists.
+        tools = [self._make_tool(e, state, visited, used_tools) for e in candidates]
         bound_model = self._model.bind_tools(tools) if tools else self._model
+        tool_by_name = {t.name: t for t in tools}
 
         user_msg: str = state.get("message", "")
         messages: list[Any] = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_msg),
         ]
-
         logger.debug(
-            "[%s] system:\n%s\ntools: %s",
-            self._node_path,
-            system_prompt,
-            [t.name for t in tools],
+            "[%s] system:\n%s\ntools: %s", self._node_path, system_prompt, list(tool_by_name)
         )
         logger.debug("[%s] → user: %s", self._node_path, user_msg)
 
         emit_route(state, tuple(visited))
-        response = cast(Any, await invoke_model(bound_model, messages, state))
 
-        while getattr(response, "tool_calls", None):
-            messages.append(response)
-            for tc in response.tool_calls:
-                name: str = tc["name"]
-                tool = next((t for t in tools if t.name == name), None)
-                logger.debug(
-                    "[%s] ← tool_call: %s(message=%r)",
-                    self._node_path, name, tc["args"].get("message", ""),
-                )
-                if tool is None:
-                    content = f"Unknown agent: {name}"
-                else:
-                    try:
-                        content = await tool.ainvoke(tc["args"])
-                        logger.debug(
-                            "[%s] → tool_result[%s]: %s",
-                            self._node_path, name, str(content)[:300],
-                        )
-                        used_tools.append(
-                            ToolUsageRecord(
-                                name=name,
-                                provider="local",
-                                status="succeeded",
-                                agent_id=self._spec.id,
-                            )
-                        )
-                    except Exception as exc:
-                        content = f"Agent error: {exc}"
-                        used_tools.append(
-                            ToolUsageRecord(
-                                name=name,
-                                provider="local",
-                                status="failed",
-                                agent_id=self._spec.id,
-                                error=str(exc)[:200],
-                            )
-                        )
-                messages.append(ToolMessage(content=str(content), tool_call_id=tc["id"]))
-            response = cast(Any, await invoke_model(bound_model, messages, state))
+        async def invoke_tool(tc: dict[str, Any]) -> str:
+            tool = tool_by_name.get(tc["name"])
+            if tool is None:
+                return f"Unknown agent: {tc['name']}"
+            return cast(str, await tool.ainvoke(tc["args"]))
 
+        response = await run_tool_loop(
+            bound_model, messages, state, self._node_path, invoke_tool
+        )
         answer = as_text(response.content)
         logger.debug("[%s] ← response: %s", self._node_path, answer[:300])
 
-        return {
-            "visited": visited,
-            "answer": answer,
-            "used_tools": used_tools,
-        }
+        return {"visited": visited, "answer": answer, "used_tools": used_tools}
