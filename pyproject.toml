@@ -69,7 +69,7 @@ openai = ["langchain-openai>=0.3"]
 # an alias. The validation command is implemented; graph/run/serve commands are
 # deferred to later tasks.
 [project.scripts]
-agentctl = "agent_engine.cli.main:app"
+agentctl = "agent_engine.cli:cli"
 
 [project.urls]
 Documentation = "https://github.com/example/agent-engine/tree/main/docs"
