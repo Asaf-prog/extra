@@ -59,33 +59,17 @@ class LangGraphEngine(Engine):
         self._tool_loader: ToolLoader | None = None
         self._resolver_loader: ResolverLoader | None = None
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
-
     async def build(self, spec: SystemSpec) -> None:
         self._system_name = spec.meta.name
-
-        # 1. filters — access control, feature flags, etc.
         self._filters = self._setup_filters(spec)
-
-        # 2. MCP — connect to servers, collect tools per server
         self._mcp_tools = await self._connect_mcps(spec)
-
-        # 3. loaders — tools and resolvers from plugins/
         self._tool_loader = ToolLoader(self._base_dir)
         self._resolver_loader = ResolverLoader(self._base_dir)
-
-        # 4. compile — build StateGraph from spec tree
         self._app = self._compile_graph(spec)
 
     async def close(self) -> None:
         self._mcp_clients.clear()
         self._mcp_tools.clear()
-
-    # ------------------------------------------------------------------
-    # Execution
-    # ------------------------------------------------------------------
 
     def _new_state(
         self,
@@ -151,10 +135,6 @@ class LangGraphEngine(Engine):
         finally:
             await task
 
-    # ------------------------------------------------------------------
-    # Build steps
-    # ------------------------------------------------------------------
-
     def _setup_filters(self, spec: SystemSpec) -> list[RouteFilter]:
         filters: list[RouteFilter] = []
         if has_protected_nodes(spec.graph):
@@ -192,10 +172,6 @@ class LangGraphEngine(Engine):
         self._wire_node(builder, spec.graph, parent_path=None)
         builder.add_edge(START, node_id(spec.graph, parent_path=None))
         return builder.compile()
-
-    # ------------------------------------------------------------------
-    # Graph wiring
-    # ------------------------------------------------------------------
 
     def _wire_node(
         self,

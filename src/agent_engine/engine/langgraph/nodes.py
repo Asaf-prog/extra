@@ -41,8 +41,9 @@ _ORCHESTRATOR_CONTRACT = """
 """
 
 
-# Input schema for child-agent tools exposed to the orchestrator LLM
 class _AgentCall(BaseModel):
+    """Input schema for a child-agent tool."""
+
     message: str
 
 
@@ -86,18 +87,10 @@ class AgentNode:
         self._resolver_loader = resolver_loader
         self._base_dir = base_dir
 
-    # ------------------------------------------------------------------
-    # LangGraph callable
-    # ------------------------------------------------------------------
-
     async def __call__(self, state: GraphState) -> dict[str, object]:
         ctx = self._resolve_context()
         system_prompt = self._build_prompt(ctx)
         return await self._run(system_prompt, state)
-
-    # ------------------------------------------------------------------
-    # Steps
-    # ------------------------------------------------------------------
 
     def _resolve_context(self) -> dict[str, str]:
         """Run every declared resolver and return the accumulated key→value map.
@@ -205,19 +198,11 @@ class OrchestratorNode:
         self._filters = filters
         self._base_dir = base_dir
 
-    # ------------------------------------------------------------------
-    # LangGraph callable
-    # ------------------------------------------------------------------
-
     async def __call__(self, state: GraphState) -> dict[str, object]:
         candidates = self._filter_children(state)
         base_prompt = load_file(self._base_dir, self._spec.prompts.system) or self._spec.description
         system_prompt = f"{base_prompt}\n{_ORCHESTRATOR_CONTRACT}"
         return await self._run(system_prompt, candidates, state)
-
-    # ------------------------------------------------------------------
-    # Steps
-    # ------------------------------------------------------------------
 
     def _filter_children(self, state: GraphState) -> list[ChildEntry]:
         """Apply every RouteFilter to narrow down which child tools are available."""
