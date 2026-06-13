@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_engine.core.errors import ValidationError
-from agent_engine.core.spec import AgentSpec, GraphNode, OrchestratorSpec, SystemSpec
+from agent_engine.core.spec import GraphNode, OrchestratorSpec, SystemSpec
 
 
 class SystemSpecValidator:
@@ -34,10 +34,9 @@ class SystemSpecValidator:
                     )
                 )
 
-        if isinstance(node.node, OrchestratorSpec):
-            if node.node.prompts.orchestrator and not (
-                base_dir / node.node.prompts.orchestrator
-            ).is_file():
+        if isinstance(node.node, OrchestratorSpec) and node.node.prompts.orchestrator and not (
+            base_dir / node.node.prompts.orchestrator
+        ).is_file():
                 errors.append(
                     ValidationError(
                         field=f"{node.node.id}.prompts.orchestrator",

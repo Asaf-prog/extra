@@ -107,10 +107,15 @@ class YAMLParser(Parser):
             node_path = f"{path}.{node_id}"
             if node_id not in declared_ids:
                 errors.append(
-                    ValidationError(node_path, f"'{node_id}' is not declared in orchestrators or agents")
+                    ValidationError(
+                        node_path,
+                        f"'{node_id}' is not declared in orchestrators or agents",
+                    )
                 )
             if node_id in seen:
-                errors.append(ValidationError(node_path, f"Cycle detected: {' -> '.join([*seen, node_id])}"))
+                errors.append(ValidationError(
+                    node_path, f"Cycle detected: {' -> '.join([*seen, node_id])}"
+                ))
                 continue
             if children is not None:
                 self._validate_graph(children, declared_ids, errors, node_path, [*seen, node_id])
@@ -169,7 +174,9 @@ class YAMLParser(Parser):
             for key, value in data.items():
                 child = f"{path}.{key}"
                 if _looks_secret(str(key)):
-                    errors.append(ValidationError(child, "Hardcoded secret-like key is not allowed"))
+                    errors.append(
+                        ValidationError(child, "Hardcoded secret-like key is not allowed")
+                    )
                 self._validate_no_secrets(value, errors, child)
         elif isinstance(data, list):
             for i, item in enumerate(data):

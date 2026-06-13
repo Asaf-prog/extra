@@ -24,7 +24,9 @@ class Generator:
 
     def generate(self, spec: SystemSpec, base_dir: Path) -> GenerateResult:
         result = GenerateResult()
-        tool_ids, shared_ids, agent_resolver_ids, agents_with_shared, has_protected = _collect(spec.graph)
+        (
+            tool_ids, shared_ids, agent_resolver_ids, agents_with_shared, has_protected
+        ) = _collect(spec.graph)
 
         tools_dir = base_dir / "plugins" / "tools"
         tools_dir.mkdir(parents=True, exist_ok=True)
@@ -138,7 +140,11 @@ def _shared_resolver_stub(resolver_ids: list[str]) -> str:
 
 def _agent_resolver_stub(agent_only_ids: list[str], inherits_shared: bool) -> str:
     if inherits_shared:
-        header = "from __future__ import annotations\n\nfrom shared import SharedResolver\n\n\nclass Resolver(SharedResolver):\n"
+        header = (
+            "from __future__ import annotations\n\n"
+            "from shared import SharedResolver\n\n\n"
+            "class Resolver(SharedResolver):\n"
+        )
         init = "    def __init__(self) -> None:\n        super().__init__()\n"
     else:
         header = "from __future__ import annotations\n\n\nclass Resolver:\n"

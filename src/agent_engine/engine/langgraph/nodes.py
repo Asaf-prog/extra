@@ -1,7 +1,7 @@
 """LangGraph node callables.
 
 ``AgentNode``       — runs a single agent: resolve context → build prompt → tool loop.
-``OrchestratorRouter`` — selects the next child node for a routing node.
+``OrchestratorNode`` — supervisor agent that calls child agents as tools and synthesizes.
 """
 from __future__ import annotations
 
@@ -10,17 +10,16 @@ from pathlib import Path
 from typing import Any, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, StructuredTool
+from pydantic import BaseModel
 
 from agent_engine.core.spec import AgentSpec, GraphNode, OrchestratorSpec
 from agent_engine.engine.langgraph.filters import RouteFilter
 from agent_engine.engine.langgraph.helpers import (
-    _RouteDecision,
     as_text,
     emit_route,
     invoke_model,
     load_file,
-    node_id,
     render_prompt,
 )
 from agent_engine.loaders.resolver_loader import ResolverLoader
@@ -28,6 +27,22 @@ from agent_engine.runtime.state import GraphState
 from agent_engine.runtime.tool_models import ToolProviderName, ToolUsageRecord
 
 logger = logging.getLogger(__name__)
+
+# Appended to every orchestrator system prompt.
+# Enforces the core design contract: agents are the source of truth, not the LLM.
+_ORCHESTRATOR_CONTRACT = """
+## Instructions
+- You MUST use the available agent tools to answer requests. Never answer from general knowledge.
+- Only call a tool if its name/description clearly matches the request.
+  Do NOT call a tool for something outside its stated scope.
+- If no appropriate tool exists for part of the request, say: "I'm not able to help with that."
+- You may call multiple tools if the request covers several topics.
+"""
+
+
+# Input schema for child-agent tools exposed to the orchestrator LLM
+class _AgentCall(BaseModel):
+    message: str
 
 
 class AgentNode:
@@ -143,98 +158,168 @@ class AgentNode:
             return f"Tool error: {exc}"
 
 
-class OrchestratorRouter:
-    """Callable that selects the next child node for a routing (orchestrator) node.
+class OrchestratorNode:
+    """Supervisor-pattern orchestrator.
 
-    The selection pipeline:
-        1. ``_filter_candidates`` — apply each ``RouteFilter`` in order (access
-           control, feature flags, etc.).
-        2. ``_decide`` — call the routing LLM (if configured) to pick from the
-           remaining candidates; fall back to the first candidate on any error.
+    Child agents (AgentNode or nested OrchestratorNode) are exposed as tools
+    to the orchestrator LLM.  The LLM reads its system prompt, decides which
+    tool(s) to call, collects their answers, and synthesises a final response.
+
+    Access filters control which child tools are made available — if a child is
+    filtered out the LLM simply does not have that tool and responds naturally
+    (e.g. "I can't help with domestic flights").
     """
 
     def __init__(
         self,
         spec: OrchestratorSpec,
         node_path: str,
-        children: list[GraphNode],
-        routing_chain: Any | None,
+        model: Any,
+        child_nodes: list[tuple[GraphNode, Any]],  # (GraphNode, AgentNode | OrchestratorNode)
         filters: list[RouteFilter],
         base_dir: Path,
     ) -> None:
         self._spec = spec
         self._node_path = node_path
-        self._children = children
-        self._routing_chain = routing_chain
+        self._model = model
+        self._child_nodes = child_nodes
         self._filters = filters
         self._base_dir = base_dir
-        # Computed once; used when all candidates are filtered out
-        self._fallback = node_id(children[0], node_path)
 
     # ------------------------------------------------------------------
     # LangGraph callable
     # ------------------------------------------------------------------
 
-    async def __call__(self, state: GraphState) -> str:
-        candidates = self._filter_candidates(state)
-        if not candidates:
-            logger.warning(
-                "Orchestrator=%s: all candidates filtered out; routing to fallback",
-                self._node_path,
-            )
-            return self._fallback
-        return await self._decide(candidates, state)
+    async def __call__(self, state: GraphState) -> dict[str, object]:
+        candidates = self._filter_children(state)
+        base_prompt = load_file(self._base_dir, self._spec.prompts.system) or self._spec.description
+        system_prompt = f"{base_prompt}\n{_ORCHESTRATOR_CONTRACT}"
+        return await self._run(system_prompt, candidates, state)
 
     # ------------------------------------------------------------------
     # Steps
     # ------------------------------------------------------------------
 
-    def _filter_candidates(self, state: GraphState) -> list[GraphNode]:
-        """Apply every RouteFilter in sequence to narrow down eligible children."""
+    def _filter_children(self, state: GraphState) -> list[tuple[GraphNode, Any]]:
+        """Apply every RouteFilter to narrow down which child tools are available."""
         ctx: dict[str, Any] = cast(dict[str, Any], state.get("run_context", {}))
-        candidates: list[GraphNode] = list(self._children)
+        candidates = list(self._child_nodes)
         for f in self._filters:
-            candidates = f.filter(ctx, candidates)
+            allowed = {gn.node.id for gn in f.filter(ctx, [gn for gn, _ in candidates])}
+            candidates = [(gn, fn) for gn, fn in candidates if gn.node.id in allowed]
         return candidates
 
-    async def _decide(self, candidates: list[GraphNode], state: GraphState) -> str:
-        """Ask the routing LLM which candidate to pick.
+    def _make_tool(
+        self,
+        graph_node: GraphNode,
+        callable_node: Any,
+        parent_state: GraphState,
+        visited_acc: list[str],
+    ) -> StructuredTool:
+        """Wrap a child node as a StructuredTool the orchestrator LLM can call.
 
-        Falls back to the first remaining candidate when:
-        - no routing model is configured, or
-        - the model returns an unrecognised agent id, or
-        - the model call raises an exception.
+        ``visited_acc`` is the parent's live visited list. When the child runs it
+        adds its own path (and its children's paths) to its result; we merge those
+        additions back so the full call-chain is visible in the final route.
         """
-        if self._routing_chain is None:
-            return node_id(candidates[0], self._node_path)
+        async def invoke(message: str) -> str:
+            snapshot = list(visited_acc)
+            sub_state: dict[str, Any] = {
+                "message": message,
+                "visited": snapshot,
+                "used_tools": [],
+                "answer_stream": parent_state.get("answer_stream"),
+                "route_stream": parent_state.get("route_stream"),
+                "run_context": parent_state.get("run_context", {}),
+            }
+            result = await callable_node(sub_state)
+            # Merge new paths the child introduced beyond the snapshot
+            for path in result.get("visited", [])[len(snapshot):]:
+                visited_acc.append(path)
+            return result.get("answer", "")
 
-        orchestrator_prompt = load_file(self._base_dir, self._spec.prompts.orchestrator)
-        descriptions = "\n".join(
-            f"- {c.node.id}: {c.node.description}" for c in candidates
+        return StructuredTool.from_function(
+            coroutine=invoke,
+            name=graph_node.node.id,
+            description=graph_node.node.name or graph_node.node.id,
+            args_schema=_AgentCall,
         )
-        system = f"{orchestrator_prompt}\n\nAvailable agents:\n{descriptions}"
 
-        try:
-            decision = await self._routing_chain.ainvoke(
-                [
-                    SystemMessage(content=system),
-                    HumanMessage(content=state.get("message", "")),
-                ]
-            )
-            if isinstance(decision, _RouteDecision):
-                for c in candidates:
-                    if c.node.id == decision.next:
-                        return node_id(c, self._node_path)
-                logger.warning(
-                    "Orchestrator=%s: LLM returned unknown agent '%s'; using first candidate",
+    async def _run(
+        self,
+        system_prompt: str,
+        candidates: list[tuple[GraphNode, Any]],
+        state: GraphState,
+    ) -> dict[str, object]:
+        """Drive the orchestrator LLM tool loop and return the synthesised answer."""
+        visited: list[str] = [*state.get("visited", []), self._node_path]
+        used_tools: list[ToolUsageRecord] = list(state.get("used_tools", []))
+
+        # Build tools here so they share the live `visited` list
+        tools = [self._make_tool(gn, fn, state, visited) for gn, fn in candidates]
+        bound_model = self._model.bind_tools(tools) if tools else self._model
+
+        messages: list[Any] = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=state.get("message", "")),
+        ]
+
+        logger.debug(
+            "[%s] system_prompt:\n%s\navailable tools: %s",
+            self._node_path,
+            system_prompt,
+            [t.name for t in tools],
+        )
+
+        emit_route(state, tuple(visited))
+        response = cast(Any, await invoke_model(bound_model, messages, state))
+
+        while getattr(response, "tool_calls", None):
+            messages.append(response)
+            for tc in response.tool_calls:
+                name: str = tc["name"]
+                tool = next((t for t in tools if t.name == name), None)
+                logger.debug(
+                    "[%s] → calling agent '%s' with message: %s",
                     self._node_path,
-                    decision.next,
+                    name,
+                    tc["args"].get("message", ""),
                 )
-        except Exception:
-            logger.warning(
-                "Orchestrator=%s: routing chain raised an error; using first candidate",
-                self._node_path,
-                exc_info=True,
-            )
+                if tool is None:
+                    content = f"Unknown agent: {name}"
+                else:
+                    try:
+                        content = await tool.ainvoke(tc["args"])
+                        logger.debug(
+                            "[%s] ← agent '%s' answered: %s",
+                            self._node_path,
+                            name,
+                            str(content)[:200],
+                        )
+                        used_tools.append(
+                            ToolUsageRecord(
+                                name=name,
+                                provider="local",
+                                status="succeeded",
+                                agent_id=self._spec.id,
+                            )
+                        )
+                    except Exception as exc:
+                        content = f"Agent error: {exc}"
+                        used_tools.append(
+                            ToolUsageRecord(
+                                name=name,
+                                provider="local",
+                                status="failed",
+                                agent_id=self._spec.id,
+                                error=str(exc)[:200],
+                            )
+                        )
+                messages.append(ToolMessage(content=str(content), tool_call_id=tc["id"]))
+            response = cast(Any, await invoke_model(bound_model, messages, state))
 
-        return node_id(candidates[0], self._node_path)
+        return {
+            "visited": visited,
+            "answer": as_text(response.content),
+            "used_tools": used_tools,
+        }

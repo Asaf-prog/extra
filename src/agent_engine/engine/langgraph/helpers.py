@@ -1,35 +1,21 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import AIMessage
-from langchain_core.tools import BaseTool
-from pydantic import BaseModel
 
 from agent_engine.core.spec import AgentSpec, GraphNode
 from agent_engine.runtime.state import GraphState
-from agent_engine.runtime.streaming import RunStreamEvent
-
-
-class _RouteDecision(BaseModel):
-    next: str
 
 
 def node_id(node: GraphNode, parent_path: str | None) -> str:
     return f"{parent_path}/{node.node.id}" if parent_path else node.node.id
 
 
-def make_orchestrator_node(node_path: str) -> Callable[[GraphState], dict[str, object]]:
-    def node(state: GraphState) -> dict[str, object]:
-        return {"visited": [*state.get("visited", []), node_path]}
-    return node
-
-
 def render_prompt(template: str, ctx: dict[str, str]) -> str:
-    def replace(match: re.Match) -> str:  # type: ignore[type-arg]
+    def replace(match: re.Match[str]) -> str:
         return ctx.get(match.group(1).strip(), match.group(0))
     return re.sub(r"\{\{\s*(\w+)\s*\}\}", replace, template)
 
@@ -64,7 +50,9 @@ def as_text(content: object) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return "".join(b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str))
+        return "".join(
+            b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str)
+        )
     return str(content)
 
 

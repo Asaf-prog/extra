@@ -14,8 +14,15 @@ from agent_engine.parsers.yaml.parser import YAMLParser
 
 
 @click.group()
-def cli() -> None:
+@click.option("--log-level", default="WARNING", show_default=True,
+              type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
+              help="Logging verbosity.")
+@click.pass_context
+def cli(ctx: click.Context, log_level: str) -> None:
     """Declarative AI-agent platform CLI."""
+    import logging
+    logging.basicConfig(level=getattr(logging, log_level.upper()),
+                        format="%(levelname)s %(name)s: %(message)s")
 
 
 @cli.command()
@@ -99,7 +106,7 @@ async def _run_async(config: str, message: str, env: str | None, stream: bool) -
         async with LangGraphEngine(base_dir) as engine:
             await engine.build(spec)
             if stream:
-                async for event in await engine.stream(message):
+                async for event in engine.stream(message):
                     if event.type == "route" and event.route:
                         click.echo(f"  route  : {' → '.join(event.route)}", err=True)
                     elif event.type == "answer_delta" and event.content:

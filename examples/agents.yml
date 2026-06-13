@@ -68,6 +68,7 @@ agents:
     resolvers: [current_date, user_name]
     tools: [book_flight]
     mcps: [flights_mcp]
+    protected: true
 
   international_flights_agent:
     name: "International Flights"

@@ -27,7 +27,10 @@ class AccessFilter(RouteFilter):
         self._resolver = _load_access_resolver(base_dir)
 
     def filter(self, ctx: dict[str, Any], candidates: list[GraphNode]) -> list[GraphNode]:
-        return [n for n in candidates if self._resolver.can_access(ctx, n.node.id)]
+        return [
+            n for n in candidates
+            if not n.node.protected or self._resolver.can_access(ctx, n.node.id)
+        ]
 
 
 def _load_access_resolver(base_dir: Path) -> Any:
@@ -36,7 +39,7 @@ def _load_access_resolver(base_dir: Path) -> Any:
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
+    spec.loader.exec_module(module)
     cls = getattr(module, "AccessResolver", None)
     if cls is None:
         raise ImportError(f"{path} must define class AccessResolver")

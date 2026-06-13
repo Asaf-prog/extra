@@ -15,13 +15,11 @@ from agent_engine.core.spec import AgentSpec, GraphNode, OrchestratorSpec, Syste
 from agent_engine.engine.engine import Engine
 from agent_engine.engine.langgraph.filters import AccessFilter, RouteFilter
 from agent_engine.engine.langgraph.helpers import (
-    _RouteDecision,
     collect_mcp_servers,
     has_protected_nodes,
-    make_orchestrator_node,
     node_id,
 )
-from agent_engine.engine.langgraph.nodes import AgentNode, OrchestratorRouter
+from agent_engine.engine.langgraph.nodes import AgentNode, OrchestratorNode
 from agent_engine.engine.types import RunResult
 from agent_engine.loaders.resolver_loader import ResolverLoader
 from agent_engine.loaders.tool_loader import ToolLoader
@@ -32,6 +30,14 @@ from agent_engine.runtime.streaming import RunStreamEvent
 logger = logging.getLogger(__name__)
 
 ModelFactory = Callable[[str, str, float | None], BaseChatModel]
+
+
+def _root_cause(exc: BaseException) -> str:
+    """Return the message of the deepest non-group exception."""
+    if isinstance(exc, BaseExceptionGroup):
+        for sub in exc.exceptions:
+            return _root_cause(sub)
+    return str(exc)
 
 
 class LangGraphEngine(Engine):
@@ -74,11 +80,6 @@ class LangGraphEngine(Engine):
         self._app = self._compile_graph(spec)
 
     async def close(self) -> None:
-        for client in self._mcp_clients.values():
-            try:
-                await client.__aexit__(None, None, None)
-            except Exception:
-                logger.warning("Error closing MCP client", exc_info=True)
         self._mcp_clients.clear()
         self._mcp_tools.clear()
 
@@ -105,7 +106,9 @@ class LangGraphEngine(Engine):
         state: dict[str, Any] = {
             "message": message,
             "used_tools": [],
-            "answer_stream": lambda c: queue.put_nowait(RunStreamEvent(type="answer_delta", content=c)),
+            "answer_stream": lambda c: queue.put_nowait(
+                RunStreamEvent(type="answer_delta", content=c)
+            ),
             "route_stream": lambda r: queue.put_nowait(RunStreamEvent(type="route", route=r)),
         }
 
@@ -153,16 +156,26 @@ class LangGraphEngine(Engine):
         return filters
 
     async def _connect_mcps(self, spec: SystemSpec) -> dict[str, list[BaseTool]]:
-        """Open one MultiServerMCPClient per server. Return tools grouped by server id."""
+        """Create one MultiServerMCPClient per server and fetch its tools.
+
+        Unreachable servers are logged as warnings and skipped — the engine
+        continues with an empty tool list for that server so local tools still work.
+        """
         from langchain_mcp_adapters.client import MultiServerMCPClient
 
         mcp_tools: dict[str, list[BaseTool]] = {}
         for server_id, url in collect_mcp_servers(spec.graph).items():
             client = MultiServerMCPClient({server_id: {"url": url, "transport": "streamable_http"}})
-            await client.__aenter__()
             self._mcp_clients[server_id] = client
-            mcp_tools[server_id] = await client.get_tools()
-            logger.info("MCP server=%s connected, tools=%d", server_id, len(mcp_tools[server_id]))
+            try:
+                mcp_tools[server_id] = await client.get_tools()
+                logger.info("MCP server=%s tools=%d", server_id, len(mcp_tools[server_id]))
+            except Exception as exc:
+                reason = _root_cause(exc)
+                logger.warning(
+                    "MCP server=%s unreachable, skipping its tools: %s", server_id, reason
+                )
+                mcp_tools[server_id] = []
         return mcp_tools
 
     def _compile_graph(self, spec: SystemSpec) -> CompiledStateGraph:
@@ -182,36 +195,46 @@ class LangGraphEngine(Engine):
         node: GraphNode,
         parent_path: str | None,
     ) -> None:
+        """Add one node to the graph.
+
+        Orchestrators embed their children as tools — no conditional edges needed.
+        The graph is therefore a flat list of root-level nodes each connected to END.
+        """
         path = node_id(node, parent_path)
 
         if isinstance(node.node, OrchestratorSpec):
-            builder.add_node(path, make_orchestrator_node(path))
+            builder.add_node(path, self._build_orchestrator_node(node, parent_path))
         else:
             assert isinstance(node.node, AgentSpec)
             builder.add_node(path, self._build_agent_node(node.node, path))
 
-        if node.children:
-            router = self._build_router(node, path)
-            routes = {node_id(c, path): node_id(c, path) for c in node.children}
-            builder.add_conditional_edges(path, router, routes)
-            for child in node.children:
-                self._wire_node(builder, child, parent_path=path)
-        else:
-            builder.add_edge(path, END)
+        builder.add_edge(path, END)
 
-    def _build_router(self, node: GraphNode, node_path: str) -> OrchestratorRouter:
+    def _build_orchestrator_node(
+        self,
+        node: GraphNode,
+        parent_path: str | None,
+    ) -> OrchestratorNode:
+        """Build an OrchestratorNode whose children become tools (recursive)."""
         assert isinstance(node.node, OrchestratorSpec)
         spec = node.node
-        routing_chain: Any = None
-        if spec.model.provider and spec.model.name:
-            routing_chain = self._model_factory(
-                spec.model.provider, spec.model.name, spec.model.temperature
-            ).with_structured_output(_RouteDecision)
-        return OrchestratorRouter(
+        path = node_id(node, parent_path)
+        model = self._model_factory(spec.model.provider, spec.model.name, spec.model.temperature)
+
+        child_nodes: list[tuple[GraphNode, Any]] = []
+        for child in node.children:
+            callable_node: AgentNode | OrchestratorNode
+            if isinstance(child.node, AgentSpec):
+                callable_node = self._build_agent_node(child.node, node_id(child, path))
+            else:
+                callable_node = self._build_orchestrator_node(child, path)
+            child_nodes.append((child, callable_node))
+
+        return OrchestratorNode(
             spec=spec,
-            node_path=node_path,
-            children=list(node.children),
-            routing_chain=routing_chain,
+            node_path=path,
+            model=model,
+            child_nodes=child_nodes,
             filters=self._filters,
             base_dir=self._base_dir,
         )

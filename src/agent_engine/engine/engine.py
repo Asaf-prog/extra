@@ -16,9 +16,9 @@ class Engine(ABC):
     async def run(self, message: str) -> RunResult: ...
 
     @abstractmethod
-    async def stream(self, message: str) -> AsyncIterator[RunStreamEvent]: ...
+    def stream(self, message: str) -> AsyncIterator[RunStreamEvent]: ...
 
-    async def close(self) -> None:
+    async def close(self) -> None:  # noqa: B027
         pass
 
     async def __aenter__(self) -> Engine:

@@ -2,20 +2,19 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass(frozen=True)
 class ModelConfig:
     provider: str
     name: str
-    temperature: Optional[float] = None
+    temperature: float | None = None
 
 
 @dataclass(frozen=True)
 class BasePromptSet:
-    system: Optional[str] = None
-    user: Optional[str] = None
+    system: str | None = None
+    user: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,5 +90,5 @@ class DefaultsConfig:
 @dataclass(frozen=True)
 class SystemSpec:
     meta: SystemMeta
-    defaults: Optional[DefaultsConfig]
+    defaults: DefaultsConfig | None
     graph: GraphNode
