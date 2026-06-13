@@ -17,12 +17,16 @@ from agent_engine.parsers.yaml.parser import YAMLParser
 @click.option("--log-level", default="WARNING", show_default=True,
               type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
               help="Logging verbosity.")
+@click.option("--log-llm", is_flag=True, default=False,
+              help="Print LLM conversations (system prompts, tool calls, responses).")
 @click.pass_context
-def cli(ctx: click.Context, log_level: str) -> None:
+def cli(ctx: click.Context, log_level: str, log_llm: bool) -> None:
     """Declarative AI-agent platform CLI."""
     import logging
     logging.basicConfig(level=getattr(logging, log_level.upper()),
                         format="%(levelname)s %(name)s: %(message)s")
+    if log_llm:
+        logging.getLogger("agent_engine.llm").setLevel(logging.DEBUG)
 
 
 @cli.command()

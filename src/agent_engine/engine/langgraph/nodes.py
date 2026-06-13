@@ -28,6 +28,11 @@ from agent_engine.runtime.tool_models import ToolProviderName, ToolUsageRecord
 
 logger = logging.getLogger(__name__)
 
+# Dedicated logger for LLM conversation traces.
+# Disabled by default; enable with --log-llm (CLI) or:
+#   logging.getLogger("agent_engine.llm").setLevel(logging.DEBUG)
+llm_log = logging.getLogger("agent_engine.llm")
+
 # Appended to every orchestrator system prompt.
 # Enforces the core design contract: agents are the source of truth, not the LLM.
 _ORCHESTRATOR_CONTRACT = """
@@ -101,10 +106,14 @@ class AgentNode:
 
     async def _run(self, system_prompt: str, state: GraphState) -> dict[str, object]:
         """Drive the model + tool loop until the model stops requesting tools."""
+        user_msg: str = state.get("message", "")
         messages: list[Any] = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=state.get("message", "")),
+            HumanMessage(content=user_msg),
         ]
+
+        llm_log.debug("[%s] system:\n%s", self._node_path, system_prompt)
+        llm_log.debug("[%s] → user: %s", self._node_path, user_msg)
 
         route = (*state.get("visited", []), self._node_path)
         emit_route(state, route)
@@ -115,13 +124,24 @@ class AgentNode:
         while getattr(response, "tool_calls", None):
             messages.append(response)
             for tc in response.tool_calls:
+                llm_log.debug(
+                    "[%s] ← tool_call: %s(%s)",
+                    self._node_path, tc["name"], tc["args"],
+                )
                 content = await self._invoke_tool(tc, used_tools)
+                llm_log.debug(
+                    "[%s] → tool_result[%s]: %s",
+                    self._node_path, tc["name"], content[:300],
+                )
                 messages.append(ToolMessage(content=content, tool_call_id=tc["id"]))
             response = cast(Any, await invoke_model(self._bound_model, messages, state))
 
+        answer = as_text(response.content)
+        llm_log.debug("[%s] ← response: %s", self._node_path, answer[:300])
+
         return {
             "visited": list(route),
-            "answer": as_text(response.content),
+            "answer": answer,
             "used_tools": used_tools,
         }
 
@@ -259,17 +279,19 @@ class OrchestratorNode:
         tools = [self._make_tool(gn, fn, state, visited) for gn, fn in candidates]
         bound_model = self._model.bind_tools(tools) if tools else self._model
 
+        user_msg: str = state.get("message", "")
         messages: list[Any] = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=state.get("message", "")),
+            HumanMessage(content=user_msg),
         ]
 
-        logger.debug(
-            "[%s] system_prompt:\n%s\navailable tools: %s",
+        llm_log.debug(
+            "[%s] system:\n%s\ntools: %s",
             self._node_path,
             system_prompt,
             [t.name for t in tools],
         )
+        llm_log.debug("[%s] → user: %s", self._node_path, user_msg)
 
         emit_route(state, tuple(visited))
         response = cast(Any, await invoke_model(bound_model, messages, state))
@@ -279,22 +301,18 @@ class OrchestratorNode:
             for tc in response.tool_calls:
                 name: str = tc["name"]
                 tool = next((t for t in tools if t.name == name), None)
-                logger.debug(
-                    "[%s] → calling agent '%s' with message: %s",
-                    self._node_path,
-                    name,
-                    tc["args"].get("message", ""),
+                llm_log.debug(
+                    "[%s] ← tool_call: %s(message=%r)",
+                    self._node_path, name, tc["args"].get("message", ""),
                 )
                 if tool is None:
                     content = f"Unknown agent: {name}"
                 else:
                     try:
                         content = await tool.ainvoke(tc["args"])
-                        logger.debug(
-                            "[%s] ← agent '%s' answered: %s",
-                            self._node_path,
-                            name,
-                            str(content)[:200],
+                        llm_log.debug(
+                            "[%s] → tool_result[%s]: %s",
+                            self._node_path, name, str(content)[:300],
                         )
                         used_tools.append(
                             ToolUsageRecord(
@@ -318,8 +336,11 @@ class OrchestratorNode:
                 messages.append(ToolMessage(content=str(content), tool_call_id=tc["id"]))
             response = cast(Any, await invoke_model(bound_model, messages, state))
 
+        answer = as_text(response.content)
+        llm_log.debug("[%s] ← response: %s", self._node_path, answer[:300])
+
         return {
             "visited": visited,
-            "answer": as_text(response.content),
+            "answer": answer,
             "used_tools": used_tools,
         }
