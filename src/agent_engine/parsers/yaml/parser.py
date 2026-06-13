@@ -5,8 +5,7 @@ from typing import Any
 
 import yaml
 
-from agent_engine.core.errors import ParseError, ValidationError
-from agent_engine.core.parser import Parser
+from agent_engine.core.errors import ValidationError
 from agent_engine.core.spec import (
     AgentSpec,
     BasePromptSet,
@@ -21,6 +20,8 @@ from agent_engine.core.spec import (
     SystemSpec,
     ToolSpec,
 )
+from agent_engine.parsers.errors import ParseError
+from agent_engine.parsers.parser import Parser
 
 _SECRET_MARKERS = ("api_key", "apikey", "secret", "token", "password", "private_key")
 

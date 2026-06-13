@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from agent_engine.core.validator import SystemSpecValidator
 from agent_engine.engine.langgraph.engine import LangGraphEngine
 from agent_engine.generate.generator import Generator
-from agent_engine.parsers.yaml_parser import YAMLParser
+from agent_engine.parsers.yaml.parser import YAMLParser
 
 
 @click.group()
