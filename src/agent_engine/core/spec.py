@@ -38,6 +38,7 @@ class ToolSpec:
 class MCPSpec:
     id: str
     url: str
+    auth: bool = False  # if True, agentctl generate creates plugins/mcp_auth/{id}.py
 
 
 @dataclass(frozen=True)

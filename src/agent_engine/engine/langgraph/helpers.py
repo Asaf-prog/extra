@@ -92,12 +92,13 @@ def has_protected_nodes(node: GraphNode) -> bool:
     return any(has_protected_nodes(c) for c in node.children)
 
 
-def collect_mcp_servers(node: GraphNode) -> dict[str, str]:
-    """Return {server_id: url} for every unique MCP server in the graph."""
-    result: dict[str, str] = {}
+def collect_mcp_specs(node: GraphNode) -> dict[str, Any]:
+    """Return {server_id: MCPSpec} for every unique MCP server in the graph."""
+    from agent_engine.core.spec import MCPSpec
+    result: dict[str, MCPSpec] = {}
     if isinstance(node.node, AgentSpec):
         for mcp in node.node.mcps:
-            result.setdefault(mcp.id, mcp.url)
+            result.setdefault(mcp.id, mcp)
     for child in node.children:
-        result.update(collect_mcp_servers(child))
+        result.update(collect_mcp_specs(child))
     return result

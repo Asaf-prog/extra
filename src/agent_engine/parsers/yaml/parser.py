@@ -250,7 +250,10 @@ class YAMLParser(Parser):
                     ToolSpec(id=ref, description=tools[ref].get("description", ""))
                     for ref in raw.get("tools", [])
                 ),
-                mcps=tuple(MCPSpec(id=ref, url=mcps[ref]["url"]) for ref in raw.get("mcps", [])),
+                mcps=tuple(
+                    MCPSpec(id=ref, url=mcps[ref]["url"], auth=bool(mcps[ref].get("auth", False)))
+                    for ref in raw.get("mcps", [])
+                ),
             )
 
         return specs

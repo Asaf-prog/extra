@@ -25,7 +25,8 @@ class Generator:
     def generate(self, spec: SystemSpec, base_dir: Path) -> GenerateResult:
         result = GenerateResult()
         (
-            tool_ids, shared_ids, agent_resolver_ids, agents_with_shared, has_protected
+            tool_ids, shared_ids, agent_resolver_ids, agents_with_shared, has_protected,
+            mcp_plugin_ids,
         ) = _collect(spec.graph)
 
         tools_dir = base_dir / "plugins" / "tools"
@@ -58,6 +59,12 @@ class Generator:
                 result,
             )
 
+        if mcp_plugin_ids:
+            mcp_auth_dir = base_dir / "plugins" / "mcp_auth"
+            mcp_auth_dir.mkdir(parents=True, exist_ok=True)
+            for mcp_id in mcp_plugin_ids:
+                self._write(mcp_auth_dir / f"{mcp_id}.py", _mcp_auth_stub(mcp_id), result)
+
         return result
 
     def _write(self, path: Path, content: str, result: GenerateResult) -> None:
@@ -70,7 +77,7 @@ class Generator:
 
 def _collect(
     node: GraphNode,
-) -> tuple[dict[str, str], list[str], dict[str, list[str]], set[str], bool]:
+) -> tuple[dict[str, str], list[str], dict[str, list[str]], set[str], bool, list[str]]:
     """Walk the graph and collect:
     - tool_ids: {id: description}
     - shared_ids: ordered list of shared resolver IDs (deduped across all agents)
@@ -84,6 +91,8 @@ def _collect(
     agent_resolver_ids: dict[str, list[str]] = {}
     agents_with_shared: set[str] = set()
     has_protected = False
+    mcp_plugin_ids: list[str] = []
+    seen_mcp_plugins: set[str] = set()
 
     def walk(n: GraphNode) -> None:
         nonlocal has_protected
@@ -102,6 +111,10 @@ def _collect(
                     ids = agent_resolver_ids.setdefault(n.node.id, [])
                     if r.id not in ids:
                         ids.append(r.id)
+            for mcp in n.node.mcps:
+                if mcp.auth and mcp.id not in seen_mcp_plugins:
+                    mcp_plugin_ids.append(mcp.id)
+                    seen_mcp_plugins.add(mcp.id)
         for child in n.children:
             walk(child)
 
@@ -111,7 +124,9 @@ def _collect(
     for agent_id in agents_with_shared:
         agent_resolver_ids.setdefault(agent_id, [])
 
-    return tool_ids, shared_ids, agent_resolver_ids, agents_with_shared, has_protected
+    return (
+        tool_ids, shared_ids, agent_resolver_ids, agents_with_shared, has_protected, mcp_plugin_ids
+    )
 
 
 def _tool_stub(tool_id: str, description: str) -> str:
@@ -168,4 +183,13 @@ def _access_stub() -> str:
         "class AccessResolver:\n"
         "    def can_access(self, ctx: dict, node_id: str) -> bool:\n"
         "        raise NotImplementedError\n"
+    )
+
+
+def _mcp_auth_stub(mcp_id: str) -> str:
+    return (
+        "from __future__ import annotations\n\n\n"
+        f"async def get_headers() -> dict[str, str]:\n"
+        f'    """Return HTTP headers to authenticate requests to the {mcp_id} MCP server."""\n'
+        "    raise NotImplementedError\n"
     )

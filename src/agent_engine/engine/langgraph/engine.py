@@ -15,7 +15,7 @@ from agent_engine.core.spec import AgentSpec, GraphNode, OrchestratorSpec, Syste
 from agent_engine.engine.engine import Engine
 from agent_engine.engine.langgraph.filters import AccessFilter, RouteFilter
 from agent_engine.engine.langgraph.helpers import (
-    collect_mcp_servers,
+    collect_mcp_specs,
     has_protected_nodes,
     node_id,
 )
@@ -146,14 +146,24 @@ class LangGraphEngine(Engine):
     async def _connect_mcps(self, spec: SystemSpec) -> dict[str, list[BaseTool]]:
         """Create one MultiServerMCPClient per server and fetch its tools.
 
-        Unreachable servers are logged as warnings and skipped — the engine
-        continues with an empty tool list for that server so local tools still work.
+        If plugins/mcp_auth/{server_id}.py exists, get_headers() is called and
+        the returned headers are attached to every request for that server.
+        Unreachable servers are logged as warnings and skipped.
         """
         from langchain_mcp_adapters.client import MultiServerMCPClient
 
+        from agent_engine.loaders.mcp_auth_loader import MCPAuthLoader
+
+        auth_loader = MCPAuthLoader(self._base_dir)
+
         mcp_tools: dict[str, list[BaseTool]] = {}
-        for server_id, url in collect_mcp_servers(spec.graph).items():
-            client = MultiServerMCPClient({server_id: {"url": url, "transport": "streamable_http"}})
+        for server_id, mcp_spec in collect_mcp_specs(spec.graph).items():
+            headers = await auth_loader.get_headers(server_id)
+            config: dict[str, Any] = {"url": mcp_spec.url, "transport": "streamable_http"}
+            if headers:
+                config["headers"] = headers
+
+            client = MultiServerMCPClient({server_id: config})  # type: ignore[dict-item]
             self._mcp_clients[server_id] = client
             try:
                 mcp_tools[server_id] = await client.get_tools()
