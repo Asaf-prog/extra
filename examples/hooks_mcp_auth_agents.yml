@@ -4,9 +4,12 @@
 # calls to a private MCP server using before_mcp_request hooks — with no
 # per-server client code in the platform and no token ever reaching the LLM.
 #
-# The hook callables live in examples/hooks/company_auth_hooks.py. In a real
-# deployment they would live in your own importable package; point each `ref` at
-# its dotted import path (module:attribute).
+# The hook class lives in examples/plugins/hooks/mcp_auth.py and is referenced
+# by full Python import path. In a real deployment it lives in
+# your own importable package; point each `ref` at its dotted path
+# (module.path:attribute). For these refs to resolve, the package must be
+# importable — here the repo root is on sys.path so `examples.plugins.hooks...`
+# imports; see docs/RUNTIME_HOOKS.md ("Making your hooks importable").
 #
 # Secrets are NEVER written here. Hooks read them from environment variables
 # (INTERNAL_MCP_CREDENTIAL below) resolved inside the hook code.
@@ -18,6 +21,14 @@
 
 system:
   name: "Enterprise MCP Auth (hooks demo)"
+
+# Make the `examples.plugins.*` hook refs below importable no matter where the
+# CLI is launched from. Roots are resolved relative to THIS file: this config
+# sits in examples/, so ".." is the repo root, which holds the `examples`
+# package. Without this you would have to set PYTHONPATH manually.
+plugins:
+  import_roots:
+    - ".."
 
 defaults:
   model:
@@ -34,8 +45,9 @@ mcps:
 agents:
   docs_agent:
     name: "Internal Docs Researcher"
-    description: "Answers questions using the company's private docs MCP server."
+    description: "Answers questions using a private docs MCP server."
     prompts:
+      # Reuse the bundled deepwiki prompt (paths are relative to this file).
       system: "prompts/deepwiki/system.md"
     mcps: [internal_docs]
 
@@ -45,28 +57,27 @@ graph:
 hooks:
   # Fail fast at build time if the credential env var is not configured.
   on_engine_start:
-    - ref: "company_auth_hooks:validate_auth_setup"
+    - ref: "examples.plugins.hooks.mcp_auth:McpAuthHook.validate_auth_setup"
       config:
         required_env: ["INTERNAL_MCP_CREDENTIAL"]
 
   # Add correlation metadata to every run (identity is passed in by the app via
   # engine.run(message, context=RunContext(...))).
   on_run_start:
-    - ref: "company_auth_hooks:attach_user_context"
+    - ref: "examples.plugins.hooks.mcp_auth:McpAuthHook.attach_user_context"
       config:
         app_name: "acme-portal"
 
   # The key integration: inject the Authorization header before each MCP request.
-  # Swap for add_mcp_auth_headers (token exchange) or sign_mcp_request (HMAC).
   before_mcp_request:
-    - ref: "company_auth_hooks:add_static_auth_header"
+    - ref: "examples.plugins.hooks.mcp_auth:McpAuthHook.before_mcp_request"
       config:
         credential_env: "INTERNAL_MCP_CREDENTIAL"
 
   # Best-effort audit: log and continue even if the audit sink is down.
   after_tool_call:
-    - ref: "company_auth_hooks:record_tool_call"
+    - ref: "examples.plugins.hooks.mcp_auth:McpAuthHook.record_tool_call"
       failure_policy: warn
 
   on_run_error:
-    - ref: "company_auth_hooks:record_run_failure"
+    - ref: "examples.plugins.hooks.mcp_auth:McpAuthHook.record_run_failure"
