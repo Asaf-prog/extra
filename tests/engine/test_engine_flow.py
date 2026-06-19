@@ -11,6 +11,7 @@ synthesises a fixed answer:
 That single rule drives both orchestrators (children-as-tools) and agents
 (real/MCP tools), so one fake exercises the whole tree.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable

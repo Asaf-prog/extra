@@ -4,6 +4,7 @@ No real MCP server is touched: the returned httpx.Auth is driven directly
 through its async_auth_flow against a throwaway httpx.Request, which is exactly
 how httpx invokes it per request.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -40,8 +41,7 @@ async def test_auth_injects_headers_per_request(tmp_path: Path) -> None:
     _write_auth_plugin(
         tmp_path,
         "deepwiki",
-        "async def get_headers() -> dict[str, str]:\n"
-        "    return {'Authorization': 'Bearer abc'}\n",
+        "async def get_headers() -> dict[str, str]:\n    return {'Authorization': 'Bearer abc'}\n",
     )
     auth = MCPAuthLoader(tmp_path).get_auth("deepwiki")
     assert auth is not None
