@@ -1,0 +1,77 @@
+"""Bridges ``before_mcp_request`` hooks into the httpx transport layer.
+
+The platform talks to remote MCP servers through ``langchain-mcp-adapters`` /
+the MCP SDK, which accept an ``httpx.Auth`` for per-request header injection
+(this is the same seam :class:`MCPAuthLoader` uses). :class:`HookedMCPAuth`
+runs the ``before_mcp_request`` hooks on every outgoing request and applies the
+headers they produce.
+
+Why per-request instead of per-session: an MCP client is created once at build
+time and shared across runs, but each run has its own identity/auth. Reading the
+active :class:`RunContext` from a context var at request time means a single
+shared client can serve many tenants without the engine holding request state.
+
+Transport limitation: at the HTTP layer the JSON-RPC ``operation``/``tool_name``
+are inside the request body and not cheaply available, so ``operation`` defaults
+to ``"request"``. Headers are applied for every MCP operation (connect,
+list_tools, call_tool) which is what enterprise auth needs.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import AsyncGenerator
+
+import httpx
+
+from agent_engine.runtime.hooks.context import current_run_context
+from agent_engine.runtime.hooks.manager import HookManager
+from agent_engine.runtime.hooks.models import McpRequestContext
+
+logger = logging.getLogger(__name__)
+
+
+class HookedMCPAuth(httpx.Auth):
+    """An ``httpx.Auth`` that runs ``before_mcp_request`` hooks per request.
+
+    ``base`` is an optional underlying auth (e.g. a per-MCP ``MCPAuthLoader``
+    plugin) applied first; the hooks then add their headers on top. Header names
+    and values are never logged — only the count.
+    """
+
+    def __init__(
+        self, manager: HookManager, server_id: str, base: httpx.Auth | None = None
+    ) -> None:
+        self._manager = manager
+        self._server_id = server_id
+        self._base = base
+
+    async def async_auth_flow(
+        self, request: httpx.Request
+    ) -> AsyncGenerator[httpx.Request, httpx.Response]:
+        if self._base is not None:
+            # Apply the underlying plugin auth's headers first. Header-injection
+            # auth yields the request exactly once; multi-step response-driven
+            # auth is out of scope for MCP header enrichment.
+            async for prepared in self._base.async_auth_flow(request):
+                request = prepared
+                break
+
+        run_context = current_run_context.get()
+        mcp_request = McpRequestContext(
+            server_id=self._server_id,
+            url=str(request.url),
+            operation="request",
+        )
+        mcp_request = await self._manager.run_before_mcp_request(run_context, mcp_request)
+
+        for key, value in mcp_request.headers.items():
+            request.headers[key] = value
+        if mcp_request.headers:
+            logger.debug(
+                "before_mcp_request applied headers server=%s count=%d",
+                self._server_id,
+                len(mcp_request.headers),
+            )
+
+        yield request

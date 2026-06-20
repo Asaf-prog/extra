@@ -6,9 +6,10 @@ the way a YAML ``ref`` would (``tests.runtime.hooks.fixtures:sync_hook``).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
-from agent_engine.runtime.hooks.models import McpRequestContext, RunContext
+from agent_engine.runtime.hooks.models import HookInvocation, McpRequestContext, RunContext
 
 # A module-level sink so side-effect hooks can be observed without globals in
 # the test bodies. Tests clear it before use.
@@ -90,6 +91,33 @@ class MissingConfigConstructorHook:
 
 class NonCallableMethodHook:
     before_mcp_request = 123
+
+
+class ManagedHook:
+    instances_created = 0
+
+    def __init__(self, config: object | None = None) -> None:
+        type(self).instances_created += 1
+        self.config = config
+        self.calls = 0
+
+    async def before_mcp_request(self, event: HookInvocation) -> McpRequestContext:
+        self.calls += 1
+        request = event.payload_as(McpRequestContext)
+        CALLS.append(("managed_before_mcp", id(self), self.calls, event))
+        config = dict(event.config) if isinstance(event.config, Mapping) else {}
+        return request.with_headers({"Authorization": f"Bearer {config['credential']}"})
+
+    def attach_user_context(self, event: HookInvocation) -> RunContext:
+        self.calls += 1
+        context = event.payload_as(RunContext)
+        CALLS.append(("managed_run_start", id(self), self.calls, event))
+        config = dict(event.config) if isinstance(event.config, Mapping) else {}
+        return context.replace(user_id=str(config.get("user_id", "managed-user")))
+
+    def audit_warn(self, event: HookInvocation) -> None:
+        CALLS.append(("managed_warn", id(self), event))
+        raise RuntimeError("audit sink down")
 
 
 not_callable = 123

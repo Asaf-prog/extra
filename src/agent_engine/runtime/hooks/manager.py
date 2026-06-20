@@ -1,0 +1,262 @@
+"""HookManager — runs custom enterprise code at fixed runtime lifecycle points.
+
+Hooks are **not tools**: the LLM never sees them, cannot name them, and cannot
+call them. They are trusted application code the runtime executes automatically.
+
+The manager owns sync/async bridging: a hook may be a plain function, an async
+function, a callable object, or a method on a long-lived hook instance, and
+every ``run_*`` method awaits it uniformly. Because the whole runtime is async,
+no ``asyncio.run`` is needed here.
+
+Error policy (fail-closed by default, per hook ``failure_policy``):
+  * ``on_engine_start`` failure  -> build/start fails.
+  * ``on_run_start`` failure     -> the run fails.
+  * ``before_mcp_request`` fail  -> the MCP request fails.
+  * ``after_tool_call`` failure  -> the run fails (use ``failure_policy: warn``
+    for best-effort audit hooks).
+  * ``on_run_error`` failure     -> logged; the original run error is preserved.
+
+A hook with ``failure_policy: warn`` is logged and skipped on failure instead of
+aborting. Hook config values are never logged (only their keys, at DEBUG).
+"""
+
+from __future__ import annotations
+
+import inspect
+import logging
+import time
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from agent_engine.generate.manifest import hook_plugin_refs
+from agent_engine.runtime.hooks.errors import HookExecutionError, HookLoadError
+from agent_engine.runtime.hooks.loader import HookLoader
+from agent_engine.runtime.hooks.models import (
+    HOOK_POINTS,
+    EngineContext,
+    HookInvocation,
+    HookPoint,
+    McpRequestContext,
+    RunContext,
+    ToolCallContext,
+)
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class LoadedHook:
+    """A resolved hook ready to run, with its declared config and policy."""
+
+    point: HookPoint
+    ref: str
+    func: Any
+    config: dict[str, Any]
+    failure_policy: str = "fail"
+    plugin: str | None = None
+    method: str | None = None
+    event_mode: bool = False
+
+
+class HookManager:
+    """Holds the loaded hooks per point and executes them in declaration order."""
+
+    def __init__(self, hooks: Mapping[HookPoint, list[LoadedHook]] | None = None) -> None:
+        self._hooks: dict[HookPoint, list[LoadedHook]] = {p: [] for p in HOOK_POINTS}
+        for point, loaded in (hooks or {}).items():
+            self._hooks[point] = list(loaded)
+        total = sum(len(v) for v in self._hooks.values())
+        logger.info("HookManager initialized hooks=%d", total)
+
+    @classmethod
+    def empty(cls) -> HookManager:
+        """Return a manager with no registered hooks.
+
+        An empty manager is still a real runtime collaborator: all execution
+        methods are no-ops, and its presence means the engine was built.
+        """
+        return cls()
+
+    @classmethod
+    def from_config(
+        cls,
+        config: Any,
+        loader: HookLoader | None = None,
+        *,
+        manifest_path: Path | None = None,
+    ) -> HookManager:
+        """Build a manager from a ``HooksConfig`` by importing every hook ref.
+
+        Loading failures are fail-closed: a bad ref aborts construction, which in
+        turn aborts ``Engine.build`` before any request is served.
+        """
+        if config is None:
+            return cls.empty()
+
+        loader = loader or HookLoader()
+        specs = tuple(getattr(config, "hooks", ()))
+        if not specs:
+            return cls.empty()
+
+        needs_plugin_manifest = any(not spec.ref for spec in specs)
+        plugin_refs = (
+            hook_plugin_refs(manifest_path)
+            if needs_plugin_manifest and manifest_path is not None
+            else {}
+        )
+        plugin_instances: dict[str, object] = {}
+        grouped: dict[HookPoint, list[LoadedHook]] = {p: [] for p in HOOK_POINTS}
+        for spec in specs:
+            if spec.ref:
+                ref = spec.ref
+                func = loader.load(spec.point, ref, config=dict(spec.config))
+                event_mode = False
+            else:
+                plugin = spec.plugin or ""
+                method = spec.method or ""
+                class_ref = plugin_refs.get(plugin)
+                if class_ref is None:
+                    raise HookLoadError(
+                        spec.point,
+                        plugin,
+                        f"hook plugin '{plugin}' is not declared in [hooks.plugins]",
+                    )
+                ref = f"{plugin}:{method}"
+                func = loader.load_plugin_method(
+                    spec.point,
+                    plugin,
+                    method,
+                    class_ref,
+                    plugin_instances,
+                )
+                event_mode = True
+            grouped[spec.point].append(
+                LoadedHook(
+                    point=spec.point,
+                    ref=ref,
+                    func=func,
+                    config=dict(spec.config),
+                    failure_policy=spec.failure_policy,
+                    plugin=spec.plugin,
+                    method=spec.method,
+                    event_mode=event_mode,
+                )
+            )
+            logger.info("hook loaded point=%s ref=%s", spec.point, ref)
+        return cls(grouped)
+
+    def has(self, point: HookPoint) -> bool:
+        return bool(self._hooks.get(point))
+
+    @property
+    def hook_count(self) -> int:
+        """Total number of registered hook entries."""
+        return sum(len(hooks) for hooks in self._hooks.values())
+
+    # -- lifecycle execution -------------------------------------------------
+
+    async def run_engine_start(self, context: EngineContext) -> None:
+        for hook in self._hooks["on_engine_start"]:
+            await self._invoke(hook, payload=context, positional=(context, hook.config))
+
+    async def run_run_start(self, context: RunContext) -> RunContext:
+        for hook in self._hooks["on_run_start"]:
+            result = await self._invoke(
+                hook,
+                payload=context,
+                run_context=context,
+                positional=(context, hook.config),
+            )
+            if isinstance(result, RunContext):
+                context = result
+        return context
+
+    async def run_before_mcp_request(
+        self, run_context: RunContext | None, request: McpRequestContext
+    ) -> McpRequestContext:
+        for hook in self._hooks["before_mcp_request"]:
+            result = await self._invoke(
+                hook,
+                payload=request,
+                run_context=run_context,
+                positional=(run_context, request, hook.config),
+            )
+            if isinstance(result, McpRequestContext):
+                request = result
+        return request
+
+    async def run_after_tool_call(
+        self, run_context: RunContext | None, call: ToolCallContext
+    ) -> None:
+        for hook in self._hooks["after_tool_call"]:
+            await self._invoke(
+                hook,
+                payload=call,
+                run_context=run_context,
+                positional=(run_context, call, hook.config),
+            )
+
+    async def run_run_error(self, run_context: RunContext | None, error: BaseException) -> None:
+        """Run error hooks best-effort: a hook failure here never masks ``error``."""
+        for hook in self._hooks["on_run_error"]:
+            try:
+                await self._invoke(
+                    hook,
+                    payload=error,
+                    run_context=run_context,
+                    positional=(run_context, error, hook.config),
+                )
+            except Exception:  # preserve the original run error above all
+                logger.exception(
+                    "on_run_error hook failed (original error preserved) ref=%s", hook.ref
+                )
+
+    # -- internals -----------------------------------------------------------
+
+    async def _invoke(
+        self,
+        hook: LoadedHook,
+        *,
+        payload: object,
+        positional: tuple[Any, ...],
+        run_context: RunContext | None = None,
+    ) -> Any:
+        logger.info("hook start point=%s ref=%s", hook.point, hook.ref)
+        if hook.config:
+            logger.debug("hook config keys=%s", sorted(hook.config))
+        start = time.perf_counter()
+        try:
+            if hook.event_mode:
+                result = hook.func(
+                    HookInvocation(
+                        hook_point=hook.point,
+                        plugin=hook.plugin,
+                        method=hook.method,
+                        ref=None,
+                        run_context=run_context,
+                        payload=payload,
+                        config=dict(hook.config),
+                    )
+                )
+            else:
+                result = hook.func(*positional)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            logger.error(
+                "hook failed point=%s ref=%s ms=%d policy=%s err=%s",
+                hook.point,
+                hook.ref,
+                duration_ms,
+                hook.failure_policy,
+                exc,
+            )
+            if hook.failure_policy == "warn":
+                return None
+            raise HookExecutionError(hook.point, hook.ref, exc) from exc
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        logger.info("hook done point=%s ref=%s ms=%d", hook.point, hook.ref, duration_ms)
+        return result
