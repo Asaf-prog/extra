@@ -8,7 +8,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
 
-from agent_engine.core.spec import AgentSpec, GraphNode
+from agent_engine.core.spec import AgentSpec, GraphNode, OrchestratorSpec
 from agent_engine.runtime.state import GraphState
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,35 @@ def has_protected_nodes(node: GraphNode) -> bool:
     if node.node.protected:
         return True
     return any(has_protected_nodes(c) for c in node.children)
+
+
+def walk(node: GraphNode) -> list[GraphNode]:
+    """Flatten the spec tree, parents before children."""
+    out = [node]
+    for child in node.children:
+        out.extend(walk(child))
+    return out
+
+
+def render_graph(node: GraphNode, depth: int = 0) -> list[str]:
+    """Render the spec tree as indented lines (e.g. for the startup log)."""
+    spec = node.node
+    kind = "orchestrator" if isinstance(spec, OrchestratorSpec) else "agent"
+    label = f"{'  ' * (depth + 1)}{kind} '{spec.name or spec.id}'"
+    if isinstance(spec, AgentSpec):
+        extras = []
+        if spec.tools:
+            extras.append("tools: " + ", ".join(t.id for t in spec.tools))
+        if spec.mcps:
+            extras.append("mcps: " + ", ".join(m.id for m in spec.mcps))
+        if extras:
+            label += f" [{'; '.join(extras)}]"
+    if spec.protected:
+        label += " (protected)"
+    lines = [label]
+    for child in node.children:
+        lines.extend(render_graph(child, depth + 1))
+    return lines
 
 
 def collect_mcp_specs(node: GraphNode) -> dict[str, Any]:

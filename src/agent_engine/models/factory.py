@@ -9,8 +9,14 @@ Provider integration packages (``langchain-anthropic``, ``langchain-openai``,
 
 from __future__ import annotations
 
+import logging
+
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
+
+from agent_engine.logging_config import log
+
+logger = logging.getLogger(__name__)
 
 
 def build_chat_model(
@@ -22,6 +28,8 @@ def build_chat_model(
 
     Switching providers is a configuration change, not a code change.
     """
+    log(logger, logging.INFO, "llm configured", provider=provider, model=name,
+        temperature=temperature)
     if temperature is None:
         return init_chat_model(name, model_provider=provider)
     return init_chat_model(name, model_provider=provider, temperature=temperature)

@@ -5,17 +5,13 @@ import os
 
 from langchain_core.callbacks import BaseCallbackHandler
 
+from agent_engine.logging_config import log
 from agent_engine.observability.provider import CallbackProvider
 
 logger = logging.getLogger(__name__)
 
 
 class LangfuseProvider(CallbackProvider):
-    """Langfuse — full trace of prompts, responses, and routing decisions.
-
-    The handler reads host URL and other config from its own env vars.
-    """
-
     name = "langfuse"
 
     def is_enabled(self) -> bool:
@@ -29,5 +25,5 @@ class LangfuseProvider(CallbackProvider):
                 from langfuse.langchain import CallbackHandler  # v3+
             return CallbackHandler()
         except Exception as exc:
-            logger.warning("langfuse: handler could not be built: %s", exc)
+            log(logger, logging.WARNING, "langfuse build failed", error=str(exc))
             return None
