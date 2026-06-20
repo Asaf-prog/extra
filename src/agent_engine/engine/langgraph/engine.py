@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any, cast
@@ -21,9 +22,16 @@ from agent_engine.engine.langgraph.helpers import (
 )
 from agent_engine.engine.langgraph.nodes import AgentNode, ChildEntry, OrchestratorNode
 from agent_engine.engine.types import RunResult
+from agent_engine.loaders.import_roots import register_import_roots
 from agent_engine.loaders.resolver_loader import ResolverLoader
 from agent_engine.loaders.tool_loader import ToolLoader
 from agent_engine.models.factory import build_chat_model
+from agent_engine.runtime.hooks import (
+    EngineContext,
+    HookManager,
+    RunContext,
+    current_run_context,
+)
 from agent_engine.runtime.state import GraphState
 from agent_engine.runtime.streaming import RunStreamEvent
 
@@ -38,6 +46,21 @@ def _root_cause(exc: BaseException) -> str:
         for sub in exc.exceptions:
             return _root_cause(sub)
     return str(exc)
+
+
+def _new_state(
+    message: str,
+    *,
+    answer_stream: Callable[[str], None] | None = None,
+    route_stream: Callable[[tuple[str, ...]], None] | None = None,
+) -> dict[str, Any]:
+    """Build the initial per-request state. Stream callbacks are optional."""
+    state: dict[str, Any] = {"message": message, "used_tools": []}
+    if answer_stream is not None:
+        state["answer_stream"] = answer_stream
+    if route_stream is not None:
+        state["route_stream"] = route_stream
+    return state
 
 
 class LangGraphEngine(Engine):
@@ -58,9 +81,25 @@ class LangGraphEngine(Engine):
         self._mcp_tools: dict[str, list[BaseTool]] = {}
         self._tool_loader: ToolLoader | None = None
         self._resolver_loader: ResolverLoader | None = None
+        self._hook_manager: HookManager | None = None
+        self._mcp_server_by_tool: dict[str, str] = {}
 
     async def build(self, spec: SystemSpec) -> None:
         self._system_name = spec.meta.name
+        # Register declared plugin import roots (resolved relative to the YAML
+        # file, not the CWD) before importing any plugin. This makes package-path
+        # refs like "examples.plugins.hooks.x:fn" resolve regardless of where the
+        # CLI was launched. No roots configured => no-op (unchanged behavior).
+        register_import_roots(self._base_dir, spec.plugins.import_roots)
+        # HookManager is built once here (start of the build phase). Loading a
+        # bad hook ref fails the build before any request is served, and
+        # on_engine_start runs before MCP connections so tenant/auth setup is
+        # ready when those first requests go out.
+        self._hook_manager = HookManager.from_config(
+            spec.hooks,
+            manifest_path=self._base_dir / "plugins" / "plugins.toml",
+        )
+        await self._hook_manager.run_engine_start(EngineContext(system_name=spec.meta.name))
         self._filters = self._setup_filters(spec)
         self._mcp_tools = await self._connect_mcps(spec)
         self._tool_loader = ToolLoader(self._base_dir)
@@ -71,24 +110,34 @@ class LangGraphEngine(Engine):
         self._mcp_clients.clear()
         self._mcp_tools.clear()
 
-    def _new_state(
-        self,
-        message: str,
-        *,
-        answer_stream: Callable[[str], None] | None = None,
-        route_stream: Callable[[tuple[str, ...]], None] | None = None,
-    ) -> dict[str, Any]:
-        """Build the initial per-request state. Stream callbacks are optional."""
-        state: dict[str, Any] = {"message": message, "used_tools": []}
-        if answer_stream is not None:
-            state["answer_stream"] = answer_stream
-        if route_stream is not None:
-            state["route_stream"] = route_stream
-        return state
+    async def _begin_run(self, context: RunContext | None) -> RunContext:
+        """Prepare the run context and fire on_run_start. Returns the final context.
 
-    async def run(self, message: str) -> RunResult:
-        assert self._app is not None, "call build() before run()"
-        result = await self._app.ainvoke(cast(Any, self._new_state(message)))
+        A fresh ``run_id`` is generated when the caller did not supply one, so
+        audit hooks always have a correlation id.
+        """
+        hook_manager = self._require_built("running")[1]
+        ctx = context or RunContext()
+        if ctx.run_id is None:
+            ctx = ctx.replace(run_id=str(uuid.uuid4()))
+        return await hook_manager.run_run_start(ctx)
+
+    def _require_built(self, action: str) -> tuple[CompiledStateGraph, HookManager]:
+        if self._app is None or self._hook_manager is None:
+            raise RuntimeError(f"Engine must be built before {action}")
+        return self._app, self._hook_manager
+
+    async def run(self, message: str, *, context: RunContext | None = None) -> RunResult:
+        app, hook_manager = self._require_built("running")
+        ctx = await self._begin_run(context)
+        token = current_run_context.set(ctx)
+        try:
+            result = await app.ainvoke(cast(Any, _new_state(message)))
+        except Exception as exc:
+            await hook_manager.run_run_error(ctx, exc)
+            raise
+        finally:
+            current_run_context.reset(token)
         return RunResult(
             system_name=self._system_name,
             visited=result.get("visited", []),
@@ -96,11 +145,14 @@ class LangGraphEngine(Engine):
             used_tools=tuple(result.get("used_tools", [])),
         )
 
-    async def stream(self, message: str) -> AsyncIterator[RunStreamEvent]:
-        assert self._app is not None, "call build() before stream()"
+    async def stream(
+        self, message: str, *, context: RunContext | None = None
+    ) -> AsyncIterator[RunStreamEvent]:
+        app, hook_manager = self._require_built("streaming")
 
+        ctx = await self._begin_run(context)
         queue: asyncio.Queue[RunStreamEvent | BaseException | None] = asyncio.Queue()
-        state = self._new_state(
+        state = _new_state(
             message,
             answer_stream=lambda c: queue.put_nowait(
                 RunStreamEvent(type="answer_delta", content=c)
@@ -110,21 +162,26 @@ class LangGraphEngine(Engine):
 
         async def run_graph() -> None:
             try:
-                result = await self._app.ainvoke(cast(Any, state))  # type: ignore[union-attr]
-                queue.put_nowait(RunStreamEvent(
-                    type="final",
-                    content=result.get("answer", ""),
-                    route=tuple(result.get("visited", [])),
-                    system_name=self._system_name,
-                    used_tools=tuple(result.get("used_tools", [])),
-                ))
+                result = await app.ainvoke(cast(Any, state))
+                queue.put_nowait(
+                    RunStreamEvent(
+                        type="final",
+                        content=result.get("answer", ""),
+                        route=tuple(result.get("visited", [])),
+                        system_name=self._system_name,
+                        used_tools=tuple(result.get("used_tools", [])),
+                    )
+                )
             except Exception as exc:
+                await hook_manager.run_run_error(ctx, exc)
                 queue.put_nowait(exc)
             finally:
                 queue.put_nowait(None)
 
-        task = asyncio.create_task(run_graph())
+        # Set the context var here so the task spawned below inherits it.
+        token = current_run_context.set(ctx)
         try:
+            task = asyncio.create_task(run_graph())
             while True:
                 item = await queue.get()
                 if item is None:
@@ -132,8 +189,9 @@ class LangGraphEngine(Engine):
                 if isinstance(item, BaseException):
                     raise RuntimeError(str(item)) from item
                 yield item
-        finally:
             await task
+        finally:
+            current_run_context.reset(token)
 
     def _setup_filters(self, spec: SystemSpec) -> list[RouteFilter]:
         filters: list[RouteFilter] = []
@@ -154,13 +212,20 @@ class LangGraphEngine(Engine):
         from langchain_mcp_adapters.client import MultiServerMCPClient
 
         from agent_engine.loaders.mcp_auth_loader import MCPAuthLoader
+        from agent_engine.runtime.hooks import HookedMCPAuth
 
         auth_loader = MCPAuthLoader(self._base_dir)
+        assert self._hook_manager is not None
+        hook_mcp_auth = self._hook_manager.has("before_mcp_request")
 
         mcp_tools: dict[str, list[BaseTool]] = {}
         for server_id, mcp_spec in collect_mcp_specs(spec.graph).items():
             config: dict[str, Any] = {"url": mcp_spec.url, "transport": "streamable_http"}
             auth = auth_loader.get_auth(server_id)
+            # When before_mcp_request hooks exist, wrap any plugin auth so hooks
+            # inject their headers (auth, HMAC, tenant) on every MCP request.
+            if hook_mcp_auth:
+                auth = HookedMCPAuth(self._hook_manager, server_id, base=auth)
             if auth is not None:
                 config["auth"] = auth
 
@@ -244,7 +309,8 @@ class LangGraphEngine(Engine):
     def _build_agent_node(self, spec: AgentSpec, node_path: str) -> AgentNode:
         assert self._tool_loader is not None
         assert self._resolver_loader is not None
-        tools, mcp_names = self._build_agent_tools(spec)
+        assert self._hook_manager is not None
+        tools, mcp_names, server_by_tool = self._build_agent_tools(spec)
         model = self._model_factory(spec.model.provider, spec.model.name, spec.model.temperature)
         bound_model = model.bind_tools(tools) if tools else model
         return AgentNode(
@@ -253,20 +319,28 @@ class LangGraphEngine(Engine):
             bound_model=bound_model,
             tool_map={t.name: t for t in tools},
             mcp_tool_names=mcp_names,
+            mcp_server_by_tool=server_by_tool,
             resolver_loader=self._resolver_loader,
+            hook_manager=self._hook_manager,
             base_dir=self._base_dir,
         )
 
-    def _build_agent_tools(self, spec: AgentSpec) -> tuple[list[BaseTool], set[str]]:
-        """Return all tools for an agent and the set of MCP-sourced tool names."""
+    def _build_agent_tools(
+        self, spec: AgentSpec
+    ) -> tuple[list[BaseTool], set[str], dict[str, str]]:
+        """Return an agent's tools, the MCP-sourced tool names, and a
+        tool-name -> MCP server_id map (for after_tool_call attribution)."""
         assert self._tool_loader is not None
         tools: list[BaseTool] = []
         mcp_names: set[str] = set()
+        server_by_tool: dict[str, str] = {}
         for t in spec.tools:
             fn = self._tool_loader.load(t.id)
             tools.append(StructuredTool.from_function(fn, description=t.description))
         for mcp in spec.mcps:
             server_tools = self._mcp_tools.get(mcp.id, [])
             tools.extend(server_tools)
-            mcp_names.update(t.name for t in server_tools)
-        return tools, mcp_names
+            for st in server_tools:
+                mcp_names.add(st.name)
+                server_by_tool[st.name] = mcp.id
+        return tools, mcp_names, server_by_tool

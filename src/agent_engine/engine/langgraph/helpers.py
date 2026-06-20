@@ -21,6 +21,7 @@ def node_id(node: GraphNode, parent_path: str | None) -> str:
 def render_prompt(template: str, ctx: dict[str, str]) -> str:
     def replace(match: re.Match[str]) -> str:
         return ctx.get(match.group(1).strip(), match.group(0))
+
     return re.sub(r"\{\{\s*(\w+)\s*\}\}", replace, template)
 
 
@@ -95,6 +96,7 @@ def has_protected_nodes(node: GraphNode) -> bool:
 def collect_mcp_specs(node: GraphNode) -> dict[str, Any]:
     """Return {server_id: MCPSpec} for every unique MCP server in the graph."""
     from agent_engine.core.spec import MCPSpec
+
     result: dict[str, MCPSpec] = {}
     if isinstance(node.node, AgentSpec):
         for mcp in node.node.mcps:

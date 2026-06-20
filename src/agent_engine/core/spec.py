@@ -79,6 +79,44 @@ class GraphNode:
 
 
 @dataclass(frozen=True)
+class HookSpec:
+    """One declared runtime hook: where it runs, what it is, how it behaves.
+
+    ``point`` is a hook lifecycle point (e.g. "before_mcp_request"). A hook is
+    declared either by explicit Python ``ref`` or by managed ``plugin`` +
+    ``method`` resolved through plugins.toml. ``config`` is an opaque mapping
+    passed to the hook invocation; ``failure_policy`` is "fail" (default,
+    fail-closed) or "warn" (best-effort: log and continue on hook error).
+    """
+
+    point: str
+    ref: str | None = None
+    config: dict[str, object] = field(default_factory=dict)
+    failure_policy: str = "fail"
+    plugin: str | None = None
+    method: str | None = None
+
+
+@dataclass(frozen=True)
+class HooksConfig:
+    """All hooks declared for a system, in declaration order per point."""
+
+    hooks: tuple[HookSpec, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class PluginsConfig:
+    """Plugin loading configuration.
+
+    ``import_roots`` are directories to put on ``sys.path`` so package-path
+    plugin refs (e.g. ``examples.plugins.hooks.x:fn``) import reliably. Each is
+    resolved relative to the agent YAML file, not the shell's working directory.
+    """
+
+    import_roots: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
 class SystemMeta:
     name: str
 
@@ -93,3 +131,5 @@ class SystemSpec:
     meta: SystemMeta
     defaults: DefaultsConfig | None
     graph: GraphNode
+    hooks: HooksConfig = field(default_factory=HooksConfig)
+    plugins: PluginsConfig = field(default_factory=PluginsConfig)

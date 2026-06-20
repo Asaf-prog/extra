@@ -14,13 +14,18 @@ from agent_engine.parsers.yaml.parser import YAMLParser
 
 
 @click.group()
-@click.option("--log-level", default="WARNING", show_default=True,
-              type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
-              help="Logging verbosity.")
+@click.option(
+    "--log-level",
+    default="WARNING",
+    show_default=True,
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
+    help="Logging verbosity.",
+)
 @click.pass_context
 def cli(ctx: click.Context, log_level: str) -> None:
     """Declarative AI-agent platform CLI."""
     import logging
+
     level = getattr(logging, log_level.upper())
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
     if level == logging.DEBUG:

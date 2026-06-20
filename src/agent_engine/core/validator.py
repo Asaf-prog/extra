@@ -34,15 +34,17 @@ class SystemSpecValidator:
                     )
                 )
 
-        if isinstance(node.node, OrchestratorSpec) and node.node.prompts.orchestrator and not (
-            base_dir / node.node.prompts.orchestrator
-        ).is_file():
-                errors.append(
-                    ValidationError(
-                        field=f"{node.node.id}.prompts.orchestrator",
-                        message=f"Prompt file not found: {node.node.prompts.orchestrator}",
-                    )
+        if (
+            isinstance(node.node, OrchestratorSpec)
+            and node.node.prompts.orchestrator
+            and not (base_dir / node.node.prompts.orchestrator).is_file()
+        ):
+            errors.append(
+                ValidationError(
+                    field=f"{node.node.id}.prompts.orchestrator",
+                    message=f"Prompt file not found: {node.node.prompts.orchestrator}",
                 )
+            )
 
         if node.node.protected and not (base_dir / "plugins" / "access.py").is_file():
             errors.append(

@@ -3,9 +3,11 @@
 ``AgentNode``        — runs a single agent: resolve context → build prompt → tool loop.
 ``OrchestratorNode`` — supervisor agent that calls child agents as tools and synthesizes.
 """
+
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -24,6 +26,7 @@ from agent_engine.engine.langgraph.helpers import (
     run_tool_loop,
 )
 from agent_engine.loaders.resolver_loader import ResolverLoader
+from agent_engine.runtime.hooks import HookManager, ToolCallContext, current_run_context
 from agent_engine.runtime.state import GraphState
 from agent_engine.runtime.tool_models import ToolProviderName, ToolUsageRecord
 
@@ -77,14 +80,18 @@ class AgentNode:
         tool_map: dict[str, BaseTool],
         mcp_tool_names: set[str],
         resolver_loader: ResolverLoader,
+        hook_manager: HookManager,
         base_dir: Path,
+        mcp_server_by_tool: dict[str, str] | None = None,
     ) -> None:
         self._spec = spec
         self._node_path = node_path
         self._bound_model = bound_model
         self._tool_map = tool_map
         self._mcp_tool_names = mcp_tool_names
+        self._mcp_server_by_tool = mcp_server_by_tool or {}
         self._resolver_loader = resolver_loader
+        self._hook_manager = hook_manager
         self._base_dir = base_dir
 
     async def __call__(self, state: GraphState) -> dict[str, object]:
@@ -135,10 +142,13 @@ class AgentNode:
         return {"visited": visited, "answer": answer, "used_tools": used_tools}
 
     async def _invoke_tool(self, tc: dict[str, Any], used_tools: list[ToolUsageRecord]) -> str:
-        """Call one tool and append a usage record. Returns the tool result as text.
+        """Call one tool, record usage, and fire after_tool_call hooks.
 
-        Errors are returned as a string (not raised) so the model can read the
-        failure message and recover or report it gracefully.
+        Tool errors are returned as a string (not raised) so the model can read
+        the failure message and recover. after_tool_call hooks run for both
+        success and failure; a hook raising under the default fail-closed policy
+        propagates and fails the run (use failure_policy: warn for best-effort
+        audit hooks).
         """
         name: str = tc["name"]
         tool = self._tool_map.get(name)
@@ -146,28 +156,42 @@ class AgentNode:
             return f"Unknown tool: {name}"
 
         provider: ToolProviderName = "mcp" if name in self._mcp_tool_names else "local"
+        server_id = self._mcp_server_by_tool.get(name)
+        start = time.perf_counter()
         try:
             result = await tool.ainvoke(tc["args"])
-            used_tools.append(
-                ToolUsageRecord(
-                    name=name,
-                    provider=provider,
-                    status="succeeded",
-                    agent_id=self._spec.id,
-                )
-            )
-            return str(result)
+            status: ToolProviderName | str = "succeeded"
+            error: str | None = None
+            output = str(result)
         except Exception as exc:
-            used_tools.append(
-                ToolUsageRecord(
-                    name=name,
-                    provider=provider,
-                    status="failed",
-                    agent_id=self._spec.id,
-                    error=str(exc)[:200],
-                )
+            status = "failed"
+            error = str(exc)[:200]
+            output = f"Tool error: {exc}"
+        latency_ms = int((time.perf_counter() - start) * 1000)
+
+        used_tools.append(
+            ToolUsageRecord(
+                name=name,
+                provider=provider,
+                status=cast(Any, status),
+                agent_id=self._spec.id,
+                server_id=server_id,
+                error=error,
             )
-            return f"Tool error: {exc}"
+        )
+        await self._hook_manager.run_after_tool_call(
+            current_run_context.get(),
+            ToolCallContext(
+                agent_id=self._spec.id,
+                tool_name=name,
+                provider=provider,
+                server_id=server_id,
+                status=cast(Any, status),
+                latency_ms=latency_ms,
+                error=error,
+            ),
+        )
+        return output
 
 
 class OrchestratorNode:
@@ -226,6 +250,7 @@ class OrchestratorNode:
         used back into them, so the final route and tool trace reflect the whole
         call-chain — not just the orchestrator's own step.
         """
+
         async def invoke(message: str) -> str:
             snapshot = list(visited_acc)
             # Children never stream their answer to the user — only the root
@@ -245,7 +270,7 @@ class OrchestratorNode:
 
             child_visited = cast("list[str]", result.get("visited", []))
             child_tools = cast("list[ToolUsageRecord]", result.get("used_tools", []))
-            for path in child_visited[len(snapshot):]:
+            for path in child_visited[len(snapshot) :]:
                 visited_acc.append(path)
             used_tools_acc.extend(child_tools)
             return cast(str, result.get("answer", ""))
@@ -290,9 +315,7 @@ class OrchestratorNode:
                 return f"Unknown agent: {tc['name']}"
             return cast(str, await tool.ainvoke(tc["args"]))
 
-        response = await run_tool_loop(
-            bound_model, messages, state, self._node_path, invoke_tool
-        )
+        response = await run_tool_loop(bound_model, messages, state, self._node_path, invoke_tool)
         answer = as_text(response.content)
         logger.debug("[%s] ← response: %s", self._node_path, answer[:300])
 
