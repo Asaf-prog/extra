@@ -135,7 +135,11 @@ def server_url() -> Iterator[str]:
     port = sock.getsockname()[1]
     sock.close()
 
-    config = uvicorn.Config(build_app(), host="127.0.0.1", port=port, log_level="critical")
+    # ws="none": HTTP-only server — skip uvicorn's websockets protocol (and its
+    # third-party deprecation warnings) since it is never used here.
+    config = uvicorn.Config(
+        build_app(), host="127.0.0.1", port=port, log_level="critical", ws="none"
+    )
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()

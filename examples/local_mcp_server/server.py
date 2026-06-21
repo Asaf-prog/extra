@@ -258,7 +258,9 @@ def main() -> None:
     path = os.getenv("LOCAL_MCP_PATH", "/mcp")
     logger.info("starting %s v%s on http://%s:%d%s", SERVER_NAME, SERVER_VERSION, host, port, path)
     logger.info("require_auth=%s", _require_auth())
-    uvicorn.run(build_app(), host=host, port=port, log_level="warning")
+    # ws="none": this server is HTTP-only (Streamable HTTP), so skip loading
+    # uvicorn's websockets protocol (avoids its deprecation warnings entirely).
+    uvicorn.run(build_app(), host=host, port=port, log_level="warning", ws="none")
 
 
 if __name__ == "__main__":
