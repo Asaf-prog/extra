@@ -2,6 +2,7 @@
 
 Search and book a flight given origin, destination and travel date
 """
+
 from __future__ import annotations
 
 import random

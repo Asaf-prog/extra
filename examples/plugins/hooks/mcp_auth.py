@@ -26,7 +26,12 @@ from __future__ import annotations
 
 import os
 
-from agent_engine.runtime.hooks import HookInvocation, McpRequestContext, RunContext, ToolCallContext
+from agent_engine.runtime.hooks import (
+    HookInvocation,
+    McpRequestContext,
+    RunContext,
+    ToolCallContext,
+)
 
 
 class McpAuthHook:
@@ -80,7 +85,7 @@ class McpAuthHook:
         context = event.run_context
         call = event.payload_as(ToolCallContext)
         run_id = context.run_id if context else None
-        print(  # noqa: T201 - example only; use your audit sink in production
+        print(
             f"[audit] run={run_id} agent={call.agent_id} tool={call.tool_name} "
             f"provider={call.provider} server={call.server_id} status={call.status} "
             f"latency_ms={call.latency_ms}"
@@ -91,4 +96,4 @@ class McpAuthHook:
         context = event.run_context
         error = event.payload_as(BaseException)
         run_id = context.run_id if context else None
-        print(f"[audit] run={run_id} FAILED: {type(error).__name__}")  # noqa: T201
+        print(f"[audit] run={run_id} FAILED: {type(error).__name__}")

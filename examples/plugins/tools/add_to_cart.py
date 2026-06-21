@@ -2,6 +2,7 @@
 
 Add a product to the customer's supermarket cart by item name and quantity
 """
+
 from __future__ import annotations
 
 import random
