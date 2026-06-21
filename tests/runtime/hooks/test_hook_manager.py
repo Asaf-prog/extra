@@ -65,7 +65,7 @@ def test_empty_config_with_manifest_path_does_not_read_manifest(
     def _fail_if_called(path: Path) -> dict[str, str]:
         raise AssertionError(f"manifest should not be read: {path}")
 
-    monkeypatch.setattr("agent_engine.runtime.hooks.manager.hook_plugin_refs", _fail_if_called)
+    monkeypatch.setattr("agent_engine.generate.manifest.hook_plugin_refs", _fail_if_called)
 
     mgr = HookManager.from_config(HooksConfig(), manifest_path=tmp_path / "plugins.toml")
 
@@ -175,7 +175,7 @@ async def test_explicit_ref_hook_does_not_read_manifest(
     def _fail_if_called(path: Path) -> dict[str, str]:
         raise AssertionError(f"manifest should not be read: {path}")
 
-    monkeypatch.setattr("agent_engine.runtime.hooks.manager.hook_plugin_refs", _fail_if_called)
+    monkeypatch.setattr("agent_engine.generate.manifest.hook_plugin_refs", _fail_if_called)
 
     mgr = HookManager.from_config(
         HooksConfig(

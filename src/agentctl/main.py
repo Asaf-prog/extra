@@ -29,25 +29,28 @@ def cli(ctx: click.Context, log_level: str | None) -> None:
 
 
 @cli.command()
-@click.option("--config", required=True, help="Path to agents.yml")
-def validate(config: str) -> None:
-    """Validate an agent YAML configuration without executing it."""
+@click.argument("config_path", type=click.Path())
+def validate(config_path: str) -> None:
+    """Validate an agent YAML spec offline (no LLM, no MCP network, no tools)."""
+    from agentctl.diagnostics import format_validation_report, validate_spec
+
+    result = validate_spec(config_path)
+    click.echo(format_validation_report(result), err=not result.ok)
+    if not result.ok:
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument("config_path", type=click.Path())
+def inspect(config_path: str) -> None:
+    """Print an offline summary of a spec (agents, MCPs, hooks, plugins, tags)."""
+    from agentctl.diagnostics import inspect_spec
+
     try:
-        spec = YAMLParser().parse(config)
+        click.echo(inspect_spec(config_path))
     except Exception as exc:
         click.echo(f"✗ {exc}", err=True)
         sys.exit(1)
-
-    base_dir = Path(config).resolve().parent
-    errors = SystemSpecValidator().validate(spec, base_dir)
-    if errors:
-        for e in errors:
-            click.echo(f"✗ {e}", err=True)
-        sys.exit(1)
-
-    click.echo("✓ YAML valid")
-    click.echo("✓ Engine validation passed")
-    click.echo(f"✓ {config}")
 
 
 @cli.command()

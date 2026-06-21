@@ -35,7 +35,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agent_engine.generate.manifest import hook_plugin_refs
 from agent_engine.runtime.hooks.errors import HookExecutionError, HookLoadError
 from agent_engine.runtime.hooks.loader import HookLoader
 from agent_engine.runtime.hooks.models import (
@@ -108,12 +107,15 @@ class HookManager:
         if not specs:
             return cls.empty()
 
+        # Imported lazily to avoid an import cycle with generate.manifest, which
+        # imports runtime.hooks.models. The manifest is read only when managed
+        # plugin/method hooks are actually declared.
         needs_plugin_manifest = any(not spec.ref for spec in specs)
-        plugin_refs = (
-            hook_plugin_refs(manifest_path)
-            if needs_plugin_manifest and manifest_path is not None
-            else {}
-        )
+        plugin_refs: dict[str, str] = {}
+        if needs_plugin_manifest and manifest_path is not None:
+            from agent_engine.generate.manifest import hook_plugin_refs
+
+            plugin_refs = hook_plugin_refs(manifest_path)
         plugin_instances: dict[str, object] = {}
         grouped: dict[HookPoint, list[LoadedHook]] = {p: [] for p in HOOK_POINTS}
         for spec in specs:

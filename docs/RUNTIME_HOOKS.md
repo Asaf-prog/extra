@@ -485,6 +485,11 @@ DeepWiki/no-hook examples build and run unchanged.
 **Hooks are trusted application code, executed in-process. This is not a sandbox
 for untrusted third-party code.**
 
+Because hooks are trusted code, `agentctl validate` (like the engine's build)
+**imports** hook refs and **instantiates** class/plugin hooks to confirm they
+resolve — it never calls hook *methods*. `agentctl inspect` shows hook
+`config_keys` only, never config values.
+
 The platform never logs, and your hooks must never log:
 
 - Authorization headers, HMAC signatures, or any inbound access token;

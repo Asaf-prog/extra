@@ -42,19 +42,15 @@ def _validate_plugins(plugins: Any, errors: list[ValidationError]) -> None:
     if roots is None:
         return
     if not isinstance(roots, list):
-        errors.append(
-            ValidationError("plugins.import_roots", "Must be a list of directory paths")
-        )
+        errors.append(ValidationError("plugins.import_roots", "Must be a list of directory paths"))
         return
     for i, root in enumerate(roots):
         if not isinstance(root, str):
-            errors.append(
-                ValidationError(f"plugins.import_roots[{i}]", "Must be a string path")
-            )
+            errors.append(ValidationError(f"plugins.import_roots[{i}]", "Must be a string path"))
 
 
 def _validate_node_refs(
-        orchestrators: dict[str, Any],
+    orchestrators: dict[str, Any],
     agents: dict[str, Any],
     resolvers: dict[str, Any],
     tools: dict[str, Any],
@@ -90,18 +86,14 @@ def _validate_node_refs(
                 )
         for ref in spec.get("tools", []):
             if ref not in tools:
-                errors.append(
-                    ValidationError(f"agents.{node_id}.tools", f"Unknown tool '{ref}'")
-                )
+                errors.append(ValidationError(f"agents.{node_id}.tools", f"Unknown tool '{ref}'"))
         for ref in spec.get("mcps", []):
             if ref not in mcps:
                 errors.append(ValidationError(f"agents.{node_id}.mcps", f"Unknown MCP '{ref}'"))
 
 
 def _build_mcp_spec(ref: str, raw: dict[str, Any]) -> MCPSpec:
-    tool_tags = _dedupe_stable(
-        str(t) for t in (raw.get("tool_tags") or []) if isinstance(t, str)
-    )
+    tool_tags = _dedupe_stable(str(t) for t in (raw.get("tool_tags") or []) if isinstance(t, str))
     transport_raw = raw.get("tool_tag_transport")
     transport = None
     if isinstance(transport_raw, dict):
@@ -151,9 +143,7 @@ def _build_plugins(raw: Any) -> PluginsConfig:
     return PluginsConfig(import_roots=tuple(r for r in roots if isinstance(r, str)))
 
 
-def _validate_hook_entry(
-        point: str, index: int, entry: Any, errors: list[ValidationError]
-) -> None:
+def _validate_hook_entry(point: str, index: int, entry: Any, errors: list[ValidationError]) -> None:
     base = f"hooks.{point}[{index}]"
     if not isinstance(entry, dict):
         errors.append(
@@ -186,9 +176,7 @@ def _validate_hook_entry(
         elif not isinstance(method, str):
             errors.append(ValidationError(f"{base}.method", "Must be a string method name"))
     else:
-        errors.append(
-            ValidationError(f"{base}.ref", "Required field 'ref' or 'plugin' + 'method'")
-        )
+        errors.append(ValidationError(f"{base}.ref", "Required field 'ref' or 'plugin' + 'method'"))
 
     if "config" in entry and not isinstance(entry["config"], dict):
         errors.append(ValidationError(f"{base}.config", "Must be a mapping if present"))
@@ -220,7 +208,7 @@ def _validate_hooks(hooks: Any, errors: list[ValidationError]) -> None:
 
 
 def _validate_mcp_tool_tags(
-        mcp_id: str, raw: dict[str, Any], errors: list[ValidationError]
+    mcp_id: str, raw: dict[str, Any], errors: list[ValidationError]
 ) -> None:
     base = f"mcps.{mcp_id}"
     tags = raw.get("tool_tags")
@@ -246,8 +234,7 @@ def _validate_mcp_tool_tags(
         errors.append(
             ValidationError(
                 f"{base}.tool_tag_transport",
-                "Must be a mapping with type 'header' (header_name) or "
-                "'query_param' (param_name)",
+                "Must be a mapping with type 'header' (header_name) or 'query_param' (param_name)",
             )
         )
         return
@@ -269,9 +256,7 @@ def _validate_mcp_tool_tags(
             )
     else:
         errors.append(
-            ValidationError(
-                f"{base}.tool_tag_transport.type", "Must be 'header' or 'query_param'"
-            )
+            ValidationError(f"{base}.tool_tag_transport.type", "Must be 'header' or 'query_param'")
         )
 
 

@@ -184,8 +184,8 @@ This repository is **agent-first**. If you are an AI coding agent:
 > Requires **Python 3.11+**. The project uses a `src/` layout with package
 > `agentplatform` and is configured via `pyproject.toml` (hatchling build;
 > `ruff`, `mypy`, `pytest` for tooling). The CLI supports `agentctl version`,
-> `agentctl validate`, `agentctl generate` (with `--mode`, `--agent`,
-> `--force`), and `agentctl run`. Graph inspection and serve are planned.
+> `agentctl validate`, `agentctl inspect`, `agentctl generate` (with `--mode`,
+> `--agent`, `--force`), `agentctl run`, and `agentctl serve`.
 
 ### 1. Create and activate a virtual environment
 
@@ -210,6 +210,27 @@ agentctl validate examples/agents.yml
 agentctl generate examples/agents.yml --mode all
 make check                     # lint (ruff) + typecheck (mypy) + test (pytest)
 ```
+
+### Inspecting a spec (offline)
+
+Two **offline** commands help you check a spec before running it — neither calls
+an LLM, connects to MCP servers, or runs tools:
+
+```bash
+# Schema + import-roots + hooks + prompt files; exits non-zero on failure.
+agentctl validate examples/local_mcp_agent_invoices.yml
+
+# Human-readable summary: agents, graph, MCP servers (url/tool_tags/transport),
+# hooks (config KEYS only, never values), and the plugins manifest.
+agentctl inspect  examples/local_mcp_agent_invoices.yml
+```
+
+`validate` performs the same pre-flight the engine does at build time — it
+parses/validates the YAML, resolves `plugins.import_roots` relative to the spec
+file, and imports/instantiates declared hooks (hooks are trusted code) — but
+stops before any network or LLM work. `inspect` never prints secrets: hook
+config is shown as `config_keys: [...]` only, and the effective tag transport
+(default header `X-MCP-Tool-Tag` vs. an explicit override) is shown per server.
 
 ### Everyday commands
 

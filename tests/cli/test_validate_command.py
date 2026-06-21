@@ -1,0 +1,155 @@
+"""Tests for the offline ``agentctl validate`` command / diagnostics."""
+
+from __future__ import annotations
+
+import sys
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from click.testing import CliRunner
+
+from agentctl.diagnostics import validate_spec
+from agentctl.main import cli
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+EXAMPLES = REPO_ROOT / "examples"
+
+
+@pytest.fixture(autouse=True)
+def _restore_sys() -> Iterator[None]:
+    """validate registers plugin import roots on sys.path; restore after each test."""
+    path_before = list(sys.path)
+    mods_before = set(sys.modules)
+    try:
+        yield
+    finally:
+        sys.path[:] = path_before
+        for name in set(sys.modules) - mods_before:
+            sys.modules.pop(name, None)
+
+
+def _ex(name: str) -> str:
+    return str(EXAMPLES / name)
+
+
+def _write(tmp_path: Path, body: str) -> str:
+    cfg = tmp_path / "spec.yml"
+    cfg.write_text(body, encoding="utf-8")
+    return str(cfg)
+
+
+# -- passing examples --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "deepwiki_mcp_agents.yml",
+        "local_mcp_agent.yml",
+        "local_mcp_agent_invoices.yml",
+        "local_mcp_agent_customers.yml",
+        "local_mcp_agent_docs_query.yml",
+        "hooks_mcp_auth_agents.yml",
+        "agents.yml",
+    ],
+)
+def test_validate_passes_on_examples(name: str) -> None:
+    result = validate_spec(_ex(name))
+    assert result.ok, result.errors
+
+
+def test_validate_reports_tool_tags() -> None:
+    result = validate_spec(_ex("local_mcp_agent_invoices.yml"))
+    assert result.ok
+    assert result.tool_tags == {"local_demo": ("invoices",)}
+
+
+def test_validate_counts_hooks_for_hook_example() -> None:
+    result = validate_spec(_ex("hooks_mcp_auth_agents.yml"))
+    assert result.ok
+    assert result.hooks == 5
+    assert result.import_roots  # ".." resolved
+
+
+def test_no_hook_spec_does_not_require_plugins_toml(tmp_path: Path) -> None:
+    # A no-hook spec with no plugins/ dir at all must still validate.
+    spec = _write(
+        tmp_path,
+        "system: {name: t}\nagents: {a: {description: d}}\ngraph: {a: }\n",
+    )
+    result = validate_spec(spec)
+    assert result.ok, result.errors
+    assert not (tmp_path / "plugins" / "plugins.toml").exists()
+
+
+def test_validate_offline_for_unreachable_mcp(tmp_path: Path) -> None:
+    # An obviously unreachable MCP URL still validates — no network is touched.
+    spec = _write(
+        tmp_path,
+        "system: {name: t}\nagents: {a: {description: d, mcps: [bc]}}\n"
+        "graph: {a: }\nmcps: {bc: {url: 'http://127.0.0.1:1/mcp'}}\n",
+    )
+    result = validate_spec(spec)
+    assert result.ok, result.errors
+    assert result.mcp_servers == 1
+
+
+# -- failing specs -----------------------------------------------------------
+
+
+def test_validate_fails_on_invalid_tool_tags(tmp_path: Path) -> None:
+    spec = _write(
+        tmp_path,
+        "system: {name: t}\nagents: {a: {description: d, mcps: [bc]}}\ngraph: {a: }\n"
+        "mcps: {bc: {url: 'https://x/mcp', tool_tags: ['']}}\n",
+    )
+    result = validate_spec(spec)
+    assert not result.ok
+    assert any("tool_tags" in e for e in result.errors)
+
+
+def test_validate_fails_on_missing_import_root(tmp_path: Path) -> None:
+    spec = _write(
+        tmp_path,
+        "system: {name: t}\nagents: {a: {description: d}}\ngraph: {a: }\n"
+        "plugins: {import_roots: ['does_not_exist']}\n",
+    )
+    result = validate_spec(spec)
+    assert not result.ok
+    assert any("import root not found" in e for e in result.errors)
+
+
+def test_validate_fails_on_plugin_hook_not_in_manifest(tmp_path: Path) -> None:
+    spec = _write(
+        tmp_path,
+        "system: {name: t}\nagents: {a: {description: d}}\ngraph: {a: }\n"
+        "hooks: {before_mcp_request: [{plugin: nope, method: x}]}\n",
+    )
+    result = validate_spec(spec)
+    assert not result.ok
+    assert any("hooks:" in e and "nope" in e for e in result.errors)
+
+
+def test_validate_fails_on_missing_file() -> None:
+    result = validate_spec("/no/such/spec.yml")
+    assert not result.ok
+    assert any("not found" in e for e in result.errors)
+
+
+# -- CLI wiring (exit codes) -------------------------------------------------
+
+
+def test_cli_validate_exit_zero() -> None:
+    runner = CliRunner()
+    res = runner.invoke(cli, ["--log-level", "WARNING", "validate", _ex("local_mcp_agent.yml")])
+    assert res.exit_code == 0
+    assert "validation passed" in res.output
+
+
+def test_cli_validate_exit_nonzero_on_failure(tmp_path: Path) -> None:
+    spec = _write(tmp_path, "system: {name: t}\n")  # missing graph -> invalid
+    runner = CliRunner()
+    res = runner.invoke(cli, ["--log-level", "WARNING", "validate", spec])
+    assert res.exit_code != 0
+    assert "Validation failed" in res.output

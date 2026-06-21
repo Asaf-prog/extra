@@ -33,7 +33,16 @@ poetry run python -m examples.local_mcp_server.server
 Serves Streamable HTTP at **`http://127.0.0.1:8765/mcp`**. Override with env vars:
 `LOCAL_MCP_HOST`, `LOCAL_MCP_PORT`, `LOCAL_MCP_PATH`.
 
-## 2. Run the agent against it
+## 2. Validate / inspect (offline, no server needed)
+
+```bash
+agentctl validate examples/local_mcp_agent_invoices.yml   # schema/hooks/import-roots
+agentctl inspect  examples/local_mcp_agent_invoices.yml   # MCP url, tool_tags, transport
+```
+
+Both are offline — they don't start the server, call an LLM, or run tools.
+
+## 3. Run the agent against it
 
 In a second terminal (set your model key, e.g. `ANTHROPIC_API_KEY`, first):
 
@@ -57,7 +66,7 @@ Add `--log-level DEBUG` **before** the subcommand to see detail:
 agentctl --log-level DEBUG run --config examples/local_mcp_agent_invoices.yml --message "List the invoices"
 ```
 
-## 3. Verifying tag behavior
+## 4. Verifying tag behavior
 
 | Config | `X-MCP-Tool-Tag` / `?tag=` | Tools discovered |
 |--------|----------------------------|------------------|
@@ -70,7 +79,7 @@ Multiple tags (e.g. `tool_tags: ["invoices", "customers"]`) return the **union**
 Selection is **server-side**: the server reads the selector and advertises the
 matching tools; the platform does no local filtering.
 
-## 4. Verifying auth / header injection (hooks)
+## 5. Verifying auth / header injection (hooks)
 
 Wire a `before_mcp_request` hook (see [docs/RUNTIME_HOOKS.md](../../docs/RUNTIME_HOOKS.md))
 to inject an `Authorization` header, then ask the agent to call `server_info` or
@@ -86,7 +95,7 @@ The **token value is never returned or logged** — only presence and scheme.
 Optional strict mode: start the server with `LOCAL_MCP_REQUIRE_AUTH=true` to make
 it reject requests that arrive without an `Authorization` header.
 
-## 5. Logs to expect
+## 6. Logs to expect
 
 Server (safe by design — never logs tokens/secrets/payloads):
 
@@ -99,7 +108,7 @@ INFO local_mcp_server: call_tool: invoice_summary
 Platform side (`--log-level DEBUG`): `mcp tool_tags configured ... default_transport=...`,
 `mcp discovery started`, `mcp connected server=local_demo tools=N`.
 
-## 6. Known limitations
+## 7. Known limitations
 
 - **Per-request tool listing** relies on the MCP SDK exposing the Starlette
   request in the server's `request_context` (true for Streamable HTTP). If a

@@ -272,11 +272,16 @@ discovered from the DeepWiki MCP server. There is no stdio configuration,
 command/args, authentication, custom client code, or DeepWiki-specific client
 class. The MCP client handles connection and discovery during `build()`.
 
-Validate the example offline, without contacting DeepWiki:
+Validate (and inspect) the example offline, without contacting DeepWiki:
 
 ```bash
-agentctl validate --config examples/deepwiki_mcp_agents.yml
+agentctl validate examples/deepwiki_mcp_agents.yml
+agentctl inspect  examples/deepwiki_mcp_agents.yml   # shows MCP url, tool_tags, transport
 ```
+
+`inspect` prints each MCP server's `tool_tags` and the effective
+`tool_tag_transport` (default header `X-MCP-Tool-Tag`, or an explicit override)
+without connecting to any server.
 
 Run the manual smoke test when provider dependencies and credentials are
 available:
