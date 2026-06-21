@@ -31,6 +31,80 @@ The default remote transport is the official MCP Streamable HTTP transport.
 The YAML contract remains URL-based; local process / stdio MCP servers are not
 supported yet.
 
+### Optional tool-discovery tags (`tool_tags`)
+
+Some MCP servers expose grouped tool sets (e.g. `invoices`, `customers`,
+`documents`, `admin`) and return only the tools for a selector supplied during
+discovery. `tool_tags` is an **optional, per-server** list that carries that
+selector — and for the common case it's all you need:
+
+```yaml
+mcps:
+  # No tags — unchanged behavior (every discovered tool is bound).
+  deepwiki:
+    url: "https://mcp.deepwiki.com/mcp"
+
+  # Recommended: just list the tags. The selector is sent by default as the
+  # header `X-MCP-Tool-Tag: invoices` (comma-joined for multiple tags).
+  businesscenter:
+    url: "https://mcp.company.com/mcp"
+    tool_tags:
+      - "invoices"
+      - "customers"          # -> X-MCP-Tool-Tag: invoices,customers
+```
+
+**Default transport.** Neither MCP `tools/list` nor `langchain-mcp-adapters` has
+a native tag/filter argument, so the selector travels at the transport layer.
+When you don't say how, the platform uses a **default header transport**:
+
+- header name: `X-MCP-Tool-Tag`
+- value: the tags, comma-joined (e.g. `invoices,customers`)
+
+### Advanced: overriding the transport
+
+`tool_tag_transport` is an **optional advanced override** for servers that
+expect a different header or a query parameter:
+
+```yaml
+mcps:
+  # Custom header name.
+  company_billing:
+    url: "https://mcp.company.com/mcp"
+    tool_tags: ["invoices"]
+    tool_tag_transport: { type: header, header_name: "X-Company-MCP-Tag" }
+
+  # Query parameter instead of a header.
+  legacy_billing:
+    url: "https://mcp.company.com/mcp"
+    tool_tags: ["invoices", "customers"]
+    tool_tag_transport: { type: query_param, param_name: "tag" }
+```
+
+- `type: header` → sends header `header_name: <comma-joined tags>`.
+- `type: query_param` → appends `param_name=<comma-joined tags>` to the `url`.
+
+Behavior and guarantees:
+
+- **Optional & per-server.** Missing or empty `tool_tags` changes nothing;
+  different servers may use different tags; tags never affect local tools or
+  other MCP servers.
+- **`tool_tag_transport` is optional.** Omit it for the default header; provide
+  it only to override. An explicit transport that is invalid (unknown `type`, or
+  a missing `header_name`/`param_name`) still fails clearly at parse and build.
+  Configured tags are never silently ignored.
+- **Server-side filtering, not client-side.** The platform does **not** filter by
+  tool-name guessing — it sends the selector and binds exactly the tools the
+  server returns. With multiple tags the returned set (union vs. intersection) is
+  whatever the server defines. The MCP server must know how to read the selector.
+- **Not exposed to the LLM.** Tags affect only discovery/binding; the model only
+  ever sees the final discovered tools. They are not instructions, application
+  tags, or tracing tags.
+- **Hooks are independent.** `before_mcp_request` hooks may still add headers
+  (auth, etc.) per request; the tag header/param is separate and composes with
+  them. `HookedMCPAuth` is unaffected.
+- **Logging.** Only the tag *count*, transport *type*, and whether the default
+  was used are logged — never tag values, headers, tokens, or payloads.
+
 ---
 
 ## Python Plugin Tools

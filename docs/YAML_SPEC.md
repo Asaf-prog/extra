@@ -149,7 +149,7 @@ agents:
 Every id referenced in `graph`, `resolvers`, `tools`, or `mcps` must be declared
 in the corresponding top-level section.
 
-MCP declarations are URL-only today:
+MCP declarations are URL-based:
 
 ```yaml
 mcps:
@@ -161,6 +161,34 @@ The platform creates a remote MCP client for each configured URL during engine
 `build()` (via `langchain-mcp-adapters`). Users do not implement MCP client
 classes, and stdio/local process MCP servers are not part of the current YAML
 contract.
+
+Each server may also declare an optional, per-server **`tool_tags`** discovery
+selector for tag-aware servers. It changes nothing when absent. For the common
+case you only list the tags — they are sent by default as the header
+`X-MCP-Tool-Tag` (comma-joined). Filtering is server-side, and only the final
+discovered tools are bound (never exposed to the LLM as tags). See
+[MCP_AND_TOOLS.md](MCP_AND_TOOLS.md) → "Optional tool-discovery tags".
+
+```yaml
+mcps:
+  # Simple, recommended: tags only -> sent as X-MCP-Tool-Tag: invoices
+  businesscenter:
+    url: "https://mcp.company.com/mcp"
+    tool_tags:
+      - "invoices"
+```
+
+`tool_tag_transport` is an optional advanced override (custom header or a
+`query_param`); when present its `type` must be `header` (with `header_name`) or
+`query_param` (with `param_name`), else parsing fails clearly:
+
+```yaml
+mcps:
+  legacy_billing:
+    url: "https://mcp.company.com/mcp"
+    tool_tags: ["invoices", "customers"]
+    tool_tag_transport: { type: query_param, param_name: "tag" }
+```
 
 ---
 
