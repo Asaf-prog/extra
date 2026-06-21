@@ -51,7 +51,7 @@ def test_formatter_renders_fields_and_request_id():
 
 def test_formatter_quotes_values_with_spaces():
     out = _format("request end", {"status": "error", "error": "boom went wrong"})
-    assert 'status=error' in out
+    assert "status=error" in out
     assert 'error="boom went wrong"' in out
 
 

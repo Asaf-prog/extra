@@ -125,9 +125,7 @@ async def test_after_tool_call_runs_for_local_tool(tmp_path: Path, model_factory
     assert calls[0].latency_ms is not None
 
 
-async def test_before_tool_call_runs_before_local_tool(
-    tmp_path: Path, model_factory: Any
-) -> None:
+async def test_before_tool_call_runs_before_local_tool(tmp_path: Path, model_factory: Any) -> None:
     _write_tool(tmp_path, "book_flight")
     spec = _system(
         _agent("flights", tools=(ToolSpec("book_flight", "book"),)),
@@ -146,9 +144,7 @@ async def test_before_tool_call_runs_before_local_tool(
     assert req.provider == "local"
 
 
-async def test_on_tool_error_runs_on_local_tool_failure(
-    tmp_path: Path, model_factory: Any
-) -> None:
+async def test_on_tool_error_runs_on_local_tool_failure(tmp_path: Path, model_factory: Any) -> None:
     _write_tool(tmp_path, "book_flight", fail=True)
     spec = _system(
         _agent("flights", tools=(ToolSpec("book_flight", "book"),)),
