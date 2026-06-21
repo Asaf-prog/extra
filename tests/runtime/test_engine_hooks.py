@@ -275,3 +275,63 @@ async def test_public_no_hook_examples_build_without_mcp_hook_auth(
 
     assert captured_configs
     assert all("auth" not in config for config in captured_configs)
+
+
+async def test_on_run_end_runs_on_success(tmp_path: Path, model_factory: Any) -> None:
+    spec = _system(_agent("solo"), HookSpec("on_run_end", f"{_FIX}:record_run_end"))
+    async with LangGraphEngine(tmp_path, model_factory=model_factory) as engine:
+        await engine.build(spec)
+        await engine.run("hi")
+    summaries = [c[1] for c in fixtures.CALLS if c[0] == "on_run_end"]
+    assert len(summaries) == 1
+    assert summaries[0].status == "succeeded"
+    assert summaries[0].run_id is not None
+    assert summaries[0].visited == ("solo",)
+
+
+async def test_on_run_end_does_not_run_on_failure(tmp_path: Path) -> None:
+    def boom_factory(provider: str, name: str, temperature: float | None) -> BaseChatModel:
+        class Boom:
+            def bind_tools(self, tools: Any) -> Any:
+                return self
+
+            async def ainvoke(self, messages: Any) -> Any:
+                raise RuntimeError("model down")
+
+            async def astream(self, messages: Any) -> Any:
+                raise RuntimeError("model down")
+                yield  # pragma: no cover
+
+        return cast(BaseChatModel, Boom())
+
+    spec = _system(
+        _agent("solo"),
+        HookSpec("on_run_end", f"{_FIX}:record_run_end"),
+        HookSpec("on_run_error", f"{_FIX}:record_run_error"),
+    )
+    async with LangGraphEngine(tmp_path, model_factory=boom_factory) as engine:
+        await engine.build(spec)
+        with pytest.raises(RuntimeError):
+            await engine.run("hi")
+    points = [c[0] for c in fixtures.CALLS]
+    assert "on_run_error" in points
+    assert "on_run_end" not in points  # success-only
+
+
+async def test_on_engine_stop_runs_on_close(tmp_path: Path, model_factory: Any) -> None:
+    spec = _system(_agent("solo"), HookSpec("on_engine_stop", f"{_FIX}:record_engine_stop"))
+    async with LangGraphEngine(tmp_path, model_factory=model_factory) as engine:
+        await engine.build(spec)
+        assert not any(c[0] == "on_engine_stop" for c in fixtures.CALLS)  # not yet
+    # close() ran on context exit.
+    assert [c[0] for c in fixtures.CALLS if c[0] == "on_engine_stop"] == ["on_engine_stop"]
+
+
+async def test_on_engine_stop_failure_does_not_block_cleanup(
+    tmp_path: Path, model_factory: Any
+) -> None:
+    spec = _system(_agent("solo"), HookSpec("on_engine_stop", f"{_FIX}:boom"))
+    engine = LangGraphEngine(tmp_path, model_factory=model_factory)
+    await engine.build(spec)
+    await engine.close()  # must not raise despite the failing stop hook
+    assert engine._mcp_tools == {}

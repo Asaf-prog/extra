@@ -125,19 +125,46 @@ async def test_after_tool_call_runs_for_local_tool(tmp_path: Path, model_factory
     assert calls[0].latency_ms is not None
 
 
-async def test_after_tool_call_receives_failure_status(tmp_path: Path, model_factory: Any) -> None:
-    _write_tool(tmp_path, "book_flight", fail=True)
+async def test_before_tool_call_runs_before_local_tool(
+    tmp_path: Path, model_factory: Any
+) -> None:
+    _write_tool(tmp_path, "book_flight")
     spec = _system(
         _agent("flights", tools=(ToolSpec("book_flight", "book"),)),
+        HookSpec("before_tool_call", f"{_FIX}:record_before_tool_call"),
         HookSpec("after_tool_call", f"{_FIX}:record_after_tool_call"),
     )
     async with LangGraphEngine(tmp_path, model_factory=model_factory) as engine:
         await engine.build(spec)
         await engine.run("book please")
 
-    call = next(c[1] for c in fixtures.CALLS if c[0] == "after_tool_call")
+    points = [c[0] for c in fixtures.CALLS]
+    # before_tool_call must fire, and before after_tool_call.
+    assert points.index("before_tool_call") < points.index("after_tool_call")
+    req = next(c[1] for c in fixtures.CALLS if c[0] == "before_tool_call")
+    assert req.tool_name == "book_flight"
+    assert req.provider == "local"
+
+
+async def test_on_tool_error_runs_on_local_tool_failure(
+    tmp_path: Path, model_factory: Any
+) -> None:
+    _write_tool(tmp_path, "book_flight", fail=True)
+    spec = _system(
+        _agent("flights", tools=(ToolSpec("book_flight", "book"),)),
+        HookSpec("after_tool_call", f"{_FIX}:record_after_tool_call"),
+        HookSpec("on_tool_error", f"{_FIX}:record_on_tool_error"),
+    )
+    async with LangGraphEngine(tmp_path, model_factory=model_factory) as engine:
+        await engine.build(spec)
+        await engine.run("book please")
+
+    # Failure routes to on_tool_error, NOT after_tool_call.
+    assert not any(c[0] == "after_tool_call" for c in fixtures.CALLS)
+    call = next(c[1] for c in fixtures.CALLS if c[0] == "on_tool_error")
     assert call.status == "failed"
     assert call.error is not None
+    assert call.provider == "local"
 
 
 async def test_after_tool_call_receives_provider_and_server_id(

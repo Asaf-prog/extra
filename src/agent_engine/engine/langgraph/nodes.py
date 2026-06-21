@@ -26,7 +26,13 @@ from agent_engine.engine.langgraph.helpers import (
     run_tool_loop,
 )
 from agent_engine.loaders.resolver_loader import ResolverLoader
-from agent_engine.runtime.hooks import HookManager, ToolCallContext, current_run_context
+from agent_engine.logging_config import log
+from agent_engine.runtime.hooks import (
+    HookManager,
+    ToolCallContext,
+    ToolRequestContext,
+    current_run_context,
+)
 from agent_engine.runtime.state import GraphState
 from agent_engine.runtime.tool_models import ToolProviderName, ToolUsageRecord
 
@@ -142,13 +148,14 @@ class AgentNode:
         return {"visited": visited, "answer": answer, "used_tools": used_tools}
 
     async def _invoke_tool(self, tc: dict[str, Any], used_tools: list[ToolUsageRecord]) -> str:
-        """Call one tool, record usage, and fire after_tool_call hooks.
+        """Call one tool with full lifecycle hooks, for both local and MCP tools.
 
-        Tool errors are returned as a string (not raised) so the model can read
-        the failure message and recover. after_tool_call hooks run for both
-        success and failure; a hook raising under the default fail-closed policy
-        propagates and fails the run (use failure_policy: warn for best-effort
-        audit hooks).
+        Order: ``before_tool_call`` (observe-only/gate) → tool call →
+        ``after_tool_call`` on success, ``on_tool_error`` on failure. Tool errors
+        are returned as a string (not raised) so the model can read the failure
+        and recover; the failure is still surfaced to ``on_tool_error`` hooks. A
+        hook raising under the default fail-closed policy propagates and fails the
+        run (use ``failure_policy: warn`` for best-effort audit hooks).
         """
         name: str = tc["name"]
         tool = self._tool_map.get(name)
@@ -157,41 +164,79 @@ class AgentNode:
 
         provider: ToolProviderName = "mcp" if name in self._mcp_tool_names else "local"
         server_id = self._mcp_server_by_tool.get(name)
+        run_context = current_run_context.get()
+
+        log(
+            logger, logging.INFO, "tool call started",
+            agent=self._spec.id, tool=name, provider=provider, server=server_id,
+        )
+        await self._hook_manager.run_before_tool_call(
+            run_context,
+            ToolRequestContext(
+                agent_id=self._spec.id, tool_name=name, provider=provider, server_id=server_id
+            ),
+        )
+
         start = time.perf_counter()
         try:
             result = await tool.ainvoke(tc["args"])
-            status: ToolProviderName | str = "succeeded"
-            error: str | None = None
-            output = str(result)
         except Exception as exc:
-            status = "failed"
+            latency_ms = int((time.perf_counter() - start) * 1000)
             error = str(exc)[:200]
-            output = f"Tool error: {exc}"
-        latency_ms = int((time.perf_counter() - start) * 1000)
+            used_tools.append(
+                ToolUsageRecord(
+                    name=name,
+                    provider=provider,
+                    status="failed",
+                    agent_id=self._spec.id,
+                    server_id=server_id,
+                    error=error,
+                )
+            )
+            log(
+                logger, logging.WARNING, "tool call failed",
+                agent=self._spec.id, tool=name, provider=provider, server=server_id, ms=latency_ms,
+            )
+            await self._hook_manager.run_on_tool_error(
+                run_context,
+                ToolCallContext(
+                    agent_id=self._spec.id,
+                    tool_name=name,
+                    provider=provider,
+                    server_id=server_id,
+                    status="failed",
+                    latency_ms=latency_ms,
+                    error=error,
+                ),
+            )
+            return f"Tool error: {exc}"
 
+        latency_ms = int((time.perf_counter() - start) * 1000)
         used_tools.append(
             ToolUsageRecord(
                 name=name,
                 provider=provider,
-                status=cast(Any, status),
+                status="succeeded",
                 agent_id=self._spec.id,
                 server_id=server_id,
-                error=error,
             )
         )
+        log(
+            logger, logging.INFO, "tool call ended",
+            agent=self._spec.id, tool=name, provider=provider, server=server_id, ms=latency_ms,
+        )
         await self._hook_manager.run_after_tool_call(
-            current_run_context.get(),
+            run_context,
             ToolCallContext(
                 agent_id=self._spec.id,
                 tool_name=name,
                 provider=provider,
                 server_id=server_id,
-                status=cast(Any, status),
+                status="succeeded",
                 latency_ms=latency_ms,
-                error=error,
             ),
         )
-        return output
+        return str(result)
 
 
 class OrchestratorNode:

@@ -345,3 +345,56 @@ def test_has_reports_declared_points() -> None:
     mgr = _manager(HookSpec("before_mcp_request", f"{_FIX}:add_auth_header"))
     assert mgr.has("before_mcp_request") is True
     assert mgr.has("after_tool_call") is False
+
+
+# -- lifecycle coverage ------------------------------------------------------
+
+_RUN_METHOD = {
+    "on_engine_start": "run_engine_start",
+    "on_engine_stop": "run_engine_stop",
+    "on_run_start": "run_run_start",
+    "on_run_end": "run_run_end",
+    "on_run_error": "run_run_error",
+    "before_tool_call": "run_before_tool_call",
+    "after_tool_call": "run_after_tool_call",
+    "on_tool_error": "run_on_tool_error",
+    "before_mcp_request": "run_before_mcp_request",
+    "after_mcp_response": "run_after_mcp_response",
+}
+
+
+def test_every_hook_point_has_a_run_method() -> None:
+    from agent_engine.runtime.hooks.models import HOOK_POINTS
+
+    # The map is exhaustive over HOOK_POINTS and each method exists.
+    assert set(_RUN_METHOD) == set(HOOK_POINTS)
+    mgr = HookManager.empty()
+    for method in _RUN_METHOD.values():
+        assert callable(getattr(mgr, method))
+
+
+async def test_empty_manager_no_ops_for_every_point() -> None:
+    from agent_engine.runtime.hooks.models import (
+        EngineContext,
+        McpRequestContext,
+        McpResponseContext,
+        RunEndContext,
+        ToolCallContext,
+        ToolRequestContext,
+    )
+
+    mgr = HookManager.empty()
+    assert mgr.hook_count == 0
+    ctx = RunContext()
+    # None of these should raise or have side effects.
+    await mgr.run_engine_start(EngineContext(system_name="s"))
+    await mgr.run_engine_stop(EngineContext(system_name="s"))
+    assert await mgr.run_run_start(ctx) is ctx  # unchanged
+    await mgr.run_run_end(ctx, RunEndContext())
+    await mgr.run_run_error(ctx, RuntimeError("x"))
+    await mgr.run_before_tool_call(ctx, ToolRequestContext("a", "t", "local"))
+    await mgr.run_after_tool_call(ctx, ToolCallContext("a", "t", "local"))
+    await mgr.run_on_tool_error(ctx, ToolCallContext("a", "t", "local", status="failed"))
+    req = McpRequestContext(server_id="s", url="https://x/mcp")
+    assert await mgr.run_before_mcp_request(ctx, req) is req  # unchanged
+    await mgr.run_after_mcp_response(ctx, McpResponseContext("s", "https://x/mcp", 200))

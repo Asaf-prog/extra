@@ -140,3 +140,36 @@ def test_secret_like_config_value_rejected(tmp_path: Path) -> None:
             "hooks:\n  before_mcp_request:\n    - ref: m:f\n"
             "      config:\n        api_key: sk-12345\n",
         )
+
+
+def test_every_hook_point_is_accepted_by_parser(tmp_path: Path) -> None:
+    from agent_engine.runtime.hooks.models import HOOK_POINTS
+
+    lines = ["hooks:"]
+    for point in HOOK_POINTS:
+        lines.append(f"  {point}:")
+        lines.append(f"    - ref: company.plugins.x:{point}_hook")
+    spec = _parse(tmp_path, "\n".join(lines) + "\n")
+    declared = {h.point for h in spec.hooks.hooks}  # type: ignore[attr-defined]
+    assert declared == set(HOOK_POINTS)
+
+
+def test_new_lifecycle_points_are_valid(tmp_path: Path) -> None:
+    # The points added for full lifecycle coverage must validate.
+    spec = _parse(
+        tmp_path,
+        "hooks:\n"
+        "  on_engine_stop:\n    - ref: m:stop\n"
+        "  on_run_end:\n    - ref: m:end\n"
+        "  before_tool_call:\n    - ref: m:before\n"
+        "  on_tool_error:\n    - ref: m:toolerr\n"
+        "  after_mcp_response:\n    - ref: m:resp\n",
+    )
+    points = {h.point for h in spec.hooks.hooks}  # type: ignore[attr-defined]
+    assert points == {
+        "on_engine_stop",
+        "on_run_end",
+        "before_tool_call",
+        "on_tool_error",
+        "after_mcp_response",
+    }

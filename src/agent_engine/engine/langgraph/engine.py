@@ -36,6 +36,7 @@ from agent_engine.runtime.hooks import (
     EngineContext,
     HookManager,
     RunContext,
+    RunEndContext,
     current_run_context,
 )
 from agent_engine.runtime.state import GraphState
@@ -65,6 +66,17 @@ def _new_state(
     if route_stream is not None:
         state["route_stream"] = route_stream
     return state
+
+
+def _run_end_context(system_name: str, ctx: RunContext, result: RunResult) -> RunEndContext:
+    """Safe summary of a completed run for on_run_end hooks (no answer text)."""
+    return RunEndContext(
+        run_id=ctx.run_id,
+        system_name=system_name,
+        status="succeeded",
+        visited=tuple(result.visited),
+        used_tool_count=len(result.used_tools),
+    )
 
 
 class LangGraphEngine(Engine):
@@ -120,6 +132,11 @@ class LangGraphEngine(Engine):
         logger.info("graph:\n%s", "\n".join(render_graph(spec.graph)))
 
     async def close(self) -> None:
+        # on_engine_stop runs best-effort before resources are released; a hook
+        # failure is logged inside run_engine_stop and never blocks cleanup.
+        if self._hook_manager is not None:
+            log(logger, logging.INFO, "engine stopping", system=self._system_name)
+            await self._hook_manager.run_engine_stop(EngineContext(system_name=self._system_name))
         self._mcp_clients.clear()
         self._mcp_tools.clear()
 
@@ -140,19 +157,33 @@ class LangGraphEngine(Engine):
         ctx = await self._begin_run(context)
         token = current_run_context.set(ctx)
         config = RunnableConfig(run_name=self._system_name, callbacks=self._callbacks)
+        log(logger, logging.INFO, "run started", run_id=ctx.run_id, system=self._system_name)
         try:
             result = await app.ainvoke(cast(Any, _new_state(message)), config)
+            run_result = RunResult(
+                system_name=self._system_name,
+                visited=result.get("visited", []),
+                answer=result.get("answer", ""),
+                used_tools=tuple(result.get("used_tools", [])),
+            )
+            await hook_manager.run_run_end(
+                ctx, _run_end_context(self._system_name, ctx, run_result)
+            )
+            log(
+                logger, logging.INFO, "run ended",
+                run_id=ctx.run_id, system=self._system_name,
+                visited=len(run_result.visited), tools=len(run_result.used_tools),
+            )
+            return run_result
         except Exception as exc:
+            log(
+                logger, logging.WARNING, "run failed",
+                run_id=ctx.run_id, system=self._system_name, error=type(exc).__name__,
+            )
             await hook_manager.run_run_error(ctx, exc)
             raise
         finally:
             current_run_context.reset(token)
-        return RunResult(
-            system_name=self._system_name,
-            visited=result.get("visited", []),
-            answer=result.get("answer", ""),
-            used_tools=tuple(result.get("used_tools", [])),
-        )
 
     async def stream(
         self, message: str, *, context: RunContext | None = None
@@ -173,21 +204,42 @@ class LangGraphEngine(Engine):
             config = RunnableConfig(run_name=self._system_name, callbacks=self._callbacks)
             try:
                 result = await app.ainvoke(cast(Any, state), config)
+                visited = tuple(result.get("visited", []))
+                used_tools = tuple(result.get("used_tools", []))
                 queue.put_nowait(
                     RunStreamEvent(
                         type="final",
                         content=result.get("answer", ""),
-                        route=tuple(result.get("visited", [])),
+                        route=visited,
                         system_name=self._system_name,
-                        used_tools=tuple(result.get("used_tools", [])),
+                        used_tools=used_tools,
                     )
                 )
+                await hook_manager.run_run_end(
+                    ctx,
+                    RunEndContext(
+                        run_id=ctx.run_id,
+                        system_name=self._system_name,
+                        visited=visited,
+                        used_tool_count=len(used_tools),
+                    ),
+                )
+                log(
+                    logger, logging.INFO, "run ended",
+                    run_id=ctx.run_id, system=self._system_name,
+                    visited=len(visited), tools=len(used_tools),
+                )
             except Exception as exc:
+                log(
+                    logger, logging.WARNING, "run failed",
+                    run_id=ctx.run_id, system=self._system_name, error=type(exc).__name__,
+                )
                 await hook_manager.run_run_error(ctx, exc)
                 queue.put_nowait(exc)
             finally:
                 queue.put_nowait(None)
 
+        log(logger, logging.INFO, "run started", run_id=ctx.run_id, system=self._system_name)
         token = current_run_context.set(ctx)
         try:
             task = asyncio.create_task(run_graph())

@@ -17,18 +17,28 @@ from typing import Any, Literal, TypeVar
 # enables a new hook kind across schema validation, loading, and execution.
 HookPoint = Literal[
     "on_engine_start",
+    "on_engine_stop",
     "on_run_start",
-    "before_mcp_request",
-    "after_tool_call",
+    "on_run_end",
     "on_run_error",
+    "before_tool_call",
+    "after_tool_call",
+    "on_tool_error",
+    "before_mcp_request",
+    "after_mcp_response",
 ]
 
 HOOK_POINTS: tuple[HookPoint, ...] = (
     "on_engine_start",
+    "on_engine_stop",
     "on_run_start",
-    "before_mcp_request",
-    "after_tool_call",
+    "on_run_end",
     "on_run_error",
+    "before_tool_call",
+    "after_tool_call",
+    "on_tool_error",
+    "before_mcp_request",
+    "after_mcp_response",
 )
 
 T = TypeVar("T")
@@ -101,13 +111,31 @@ class HookInvocation:
 
 @dataclass(frozen=True)
 class EngineContext:
-    """What an ``on_engine_start`` hook may observe about the built system.
+    """What an ``on_engine_start`` / ``on_engine_stop`` hook may observe.
 
     Intentionally read-only and minimal: hooks validate setup and initialize
-    their own clients here, they do not reconfigure the engine.
+    (or release) their own clients here, they do not reconfigure the engine.
     """
 
     system_name: str
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RunEndContext:
+    """Summary of a successfully completed run, passed to ``on_run_end`` hooks.
+
+    Safe metadata only: identifiers, the visited route, and the count of
+    observed tool calls. The raw answer text is intentionally omitted by default
+    (it may contain sensitive content); a hook that needs it can read the run
+    result through its own application channel.
+    """
+
+    run_id: str | None = None
+    system_name: str | None = None
+    status: str = "succeeded"
+    visited: tuple[str, ...] = ()
+    used_tool_count: int = 0
     metadata: dict[str, object] = field(default_factory=dict)
 
 
@@ -136,17 +164,53 @@ class McpRequestContext:
         return dataclasses.replace(self, headers={**self.headers, **headers})
 
 
+@dataclass(frozen=True)
+class McpResponseContext:
+    """An MCP HTTP response observed by ``after_mcp_response`` hooks.
+
+    Carries only safe metadata — the HTTP status code and latency — never
+    headers or the response body. As with the request, ``operation`` stays
+    ``"request"`` at the HTTP layer because the JSON-RPC operation lives in the
+    body (see docs/RUNTIME_HOOKS.md). Observe-only.
+    """
+
+    server_id: str
+    url: str
+    status_code: int
+    operation: str = "request"
+    tool_name: str | None = None
+    latency_ms: int | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
 ToolProvider = Literal["local", "mcp", "unknown"]
 ToolStatus = Literal["succeeded", "failed"]
 
 
 @dataclass(frozen=True)
+class ToolRequestContext:
+    """A tool call about to run, observed by ``before_tool_call`` hooks.
+
+    Observe-only: tool arguments are omitted (they may carry sensitive user
+    data) and the runtime does not apply mutations to the pending call in this
+    version. Covers both local and MCP tools (``server_id`` set for MCP).
+    """
+
+    agent_id: str
+    tool_name: str
+    provider: ToolProvider
+    server_id: str | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class ToolCallContext:
-    """A completed tool call observed by ``after_tool_call`` hooks.
+    """A completed tool call observed by ``after_tool_call`` (success) and
+    ``on_tool_error`` (failure) hooks.
 
     Side-effect oriented: hooks audit or emit metrics; they do not alter the
-    result in the MVP. Arguments and full results are deliberately omitted —
-    they may carry sensitive user data.
+    result. Arguments and full results are deliberately omitted — they may carry
+    sensitive user data. ``error`` is a truncated, sanitized message on failure.
     """
 
     agent_id: str

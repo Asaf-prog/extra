@@ -28,17 +28,51 @@ runs on the runtime's own schedule.
 
 ---
 
-## Lifecycle points (MVP)
+## Lifecycle points
 
-| Point | When it runs | Typical use | May return |
+Ten points across the engine, run, tool, and MCP lifecycles. Each row lists its
+payload (the `HookInvocation.payload` type, or the positional payload arg in
+explicit-ref mode) and whether a returned value is used.
+
+| Point | When it runs | Payload | Returns |
 |---|---|---|---|
-| `on_engine_start` | once, during `Engine.build()` | load tenant config, init clients, validate auth setup | — |
-| `on_run_start` | once per request, before graph execution | attach user/org/auth context, enrich metadata, audit start | updated `RunContext` |
-| `before_mcp_request` | before every outgoing MCP HTTP request | add `Authorization`, exchange tokens, sign with HMAC, add tenant/correlation headers | updated `McpRequestContext` |
-| `after_tool_call` | after any local or MCP tool call completes | audit, metrics, external logging | — (side-effect only) |
-| `on_run_error` | when a run fails | audit failure, cleanup, notify monitoring | — (side-effect only) |
+| `on_engine_start` | once, during `Engine.build()` | `EngineContext` | ignored |
+| `on_engine_stop` | once, during `Engine.close()` (best-effort) | `EngineContext` | ignored |
+| `on_run_start` | once per request, before graph execution | `RunContext` | updated `RunContext` (or `None`) |
+| `on_run_end` | once per request, on **successful** completion | `RunEndContext` | ignored |
+| `on_run_error` | when a run fails | the `BaseException` | ignored (never masks the error) |
+| `before_tool_call` | before every local or MCP tool call | `ToolRequestContext` | ignored (observe-only) |
+| `after_tool_call` | after a local or MCP tool call **succeeds** | `ToolCallContext` (status `succeeded`) | ignored |
+| `on_tool_error` | when a local or MCP tool call **fails** | `ToolCallContext` (status `failed`) | ignored |
+| `before_mcp_request` | before every outgoing MCP HTTP request | `McpRequestContext` | updated `McpRequestContext` (or `None`) |
+| `after_mcp_response` | after every MCP HTTP response | `McpResponseContext` | ignored (observe-only) |
 
 There are deliberately no `before_everything` / `after_everything` catch-alls.
+
+### Not implemented (no clean seam)
+
+These are intentionally **not** provided, to avoid fake/unreliable hooks:
+
+- **`on_mcp_error`** — at the `httpx.Auth` seam, when the transport itself raises
+  (connection error) httpx propagates the exception *without* throwing it back
+  into the auth flow, so it is not observable there. MCP **tool-call** failures
+  are instead surfaced via `on_tool_error` (with `provider="mcp"`). HTTP error
+  *responses* (4xx/5xx) are observable via `after_mcp_response.status_code`.
+- **`before_llm_call` / `after_llm_call` / `on_llm_error`** — the model-call seam
+  (`helpers.invoke_model`) is reachable, but wiring hooks there requires threading
+  the manager through the node→helper call chain, and prompt/response payloads
+  risk leaking content. Deferred until a content-safe seam is designed.
+- **`before_agent_node` / `after_agent_node` / `on_agent_node_error`** — no stable
+  tested LangGraph node seam is needed yet; omitted to avoid overcomplication.
+
+### MCP HTTP-layer limitation
+
+At the HTTP layer the JSON-RPC `operation`/`tool_name` live inside the request
+body, so `McpRequestContext.operation` and `McpResponseContext.operation` default
+to `"request"` and `tool_name` is `None`. Per-tool attribution is available at the
+tool seam instead (`ToolCallContext`/`ToolRequestContext` carry `server_id`). The
+response hook never reads or logs the body or headers — only `status_code` and
+`latency_ms`.
 
 ---
 
@@ -279,17 +313,25 @@ def on_run_error(
 
 Return values are interpreted by hook point: `on_run_start` may return an
 updated `RunContext`; `before_mcp_request` may return an updated
-`McpRequestContext`; `None` keeps the original object. Return values from
-`on_engine_start`, `after_tool_call`, and `on_run_error` are ignored.
+`McpRequestContext`; `None` keeps the original object. **All other points are
+observe-only — their return value is ignored.** (Mutating a pending tool call or
+an MCP response is not supported in this version.)
+
+In **managed plugin mode**, a method receives a single `HookInvocation` whose
+`.payload` is the same context object (use `event.payload_as(ToolCallContext)`
+for a typed view) and whose `.run_context` carries the active `RunContext`.
 
 ### Context models
 
 ```python
 RunContext(run_id, conversation_id, user_id, organization_id, metadata, auth_context)
 AuthContext(user_id, organization_id, inbound_access_token, scopes, roles, metadata)
-McpRequestContext(server_id, url, operation, tool_name, headers, metadata)
-ToolCallContext(agent_id, tool_name, provider, server_id, status, latency_ms, error, metadata)
 EngineContext(system_name, metadata)
+RunEndContext(run_id, system_name, status, visited, used_tool_count, metadata)
+ToolRequestContext(agent_id, tool_name, provider, server_id, metadata)
+ToolCallContext(agent_id, tool_name, provider, server_id, status, latency_ms, error, metadata)
+McpRequestContext(server_id, url, operation, tool_name, headers, metadata)
+McpResponseContext(server_id, url, status_code, operation, tool_name, latency_ms, metadata)
 ```
 
 All are frozen dataclasses. `RunContext.replace(**changes)` and
@@ -397,14 +439,44 @@ Fail-closed by default — security hooks must not be silently skipped:
 | Point | On hook failure (`failure_policy: fail`) |
 |---|---|
 | `on_engine_start` | `Engine.build()` fails |
+| `on_engine_stop` | logged; **cleanup still proceeds** (never raised) |
 | `on_run_start` | the run fails |
-| `before_mcp_request` | the MCP request fails |
+| `on_run_end` | the run's success path fails |
+| `before_tool_call` | the run fails (a policy gate can block the call) |
 | `after_tool_call` | the run fails |
+| `on_tool_error` | the run fails |
+| `before_mcp_request` | the MCP request fails |
+| `after_mcp_response` | the MCP request fails |
 | `on_run_error` | logged; **the original run error is preserved** |
 
 Use `failure_policy: warn` for best-effort hooks (e.g. audit) that should log
 and continue instead of aborting. Hook errors are never silently swallowed:
-they are logged with their point and `ref`, and (except `on_run_error`) raised.
+they are logged with their point and `ref`, and (except `on_engine_stop` and
+`on_run_error`, which are best-effort) raised.
+
+---
+
+## Logging and no-op behavior
+
+The runtime emits structured logs at hook and lifecycle boundaries:
+
+- **Hook lifecycle** (`HookManager`): manager init with total count; per hook
+  `loaded` / `start` / `done` (with `duration_ms`) / `failed` (with
+  `failure_policy`). Config **keys only** are logged at DEBUG — never values.
+- **Runtime stages**: `system ready`, `engine stopping`, `run started`,
+  `run ended`, `run failed`, `tool call started` / `ended` / `failed` (with
+  `latency_ms`), and at DEBUG `before_mcp_request applied headers` /
+  `after_mcp_response` (status + latency, count of applied headers).
+
+Never logged: Authorization headers, tokens, refresh tokens, HMAC secrets or
+signatures, hook config values, raw prompts, raw tool arguments/results, or raw
+MCP request/response bodies.
+
+**Hooks are fully optional.** With no `hooks:` section, `hooks: {}`, no
+`plugins.toml`, or a `plugins.toml` without `[hooks.plugins]`, the engine still
+builds a `HookManager` whose `hook_count == 0`: every `run_*` method is a safe
+no-op, no plugin manifest is read, and no hook import is attempted. The public
+DeepWiki/no-hook examples build and run unchanged.
 
 ---
 

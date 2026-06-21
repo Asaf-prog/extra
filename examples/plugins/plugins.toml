@@ -20,10 +20,15 @@ tools = "examples.plugins.tools"
 
 [hooks]
 on_engine_start = []
+on_engine_stop = []
 on_run_start = []
-before_mcp_request = []
-after_tool_call = []
+on_run_end = []
 on_run_error = []
+before_tool_call = []
+after_tool_call = []
+on_tool_error = []
+before_mcp_request = []
+after_mcp_response = []
 
 [hooks.plugins]
 mcp_auth = "examples.plugins.hooks.mcp_auth:McpAuthHook"

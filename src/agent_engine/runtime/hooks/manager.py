@@ -9,12 +9,17 @@ every ``run_*`` method awaits it uniformly. Because the whole runtime is async,
 no ``asyncio.run`` is needed here.
 
 Error policy (fail-closed by default, per hook ``failure_policy``):
-  * ``on_engine_start`` failure  -> build/start fails.
-  * ``on_run_start`` failure     -> the run fails.
-  * ``before_mcp_request`` fail  -> the MCP request fails.
-  * ``after_tool_call`` failure  -> the run fails (use ``failure_policy: warn``
+  * ``on_engine_start`` failure   -> build/start fails.
+  * ``on_engine_stop`` failure    -> logged; cleanup still proceeds.
+  * ``on_run_start`` failure      -> the run fails.
+  * ``on_run_end`` failure        -> the run's success path fails.
+  * ``before_tool_call`` failure  -> the run fails.
+  * ``after_tool_call`` failure   -> the run fails (use ``failure_policy: warn``
     for best-effort audit hooks).
-  * ``on_run_error`` failure     -> logged; the original run error is preserved.
+  * ``on_tool_error`` failure     -> the run fails (use ``failure_policy: warn``).
+  * ``before_mcp_request`` fail   -> the MCP request fails.
+  * ``after_mcp_response`` fail   -> the MCP request fails (observe-only payload).
+  * ``on_run_error`` failure      -> logged; the original run error is preserved.
 
 A hook with ``failure_policy: warn`` is logged and skipped on failure instead of
 aborting. Hook config values are never logged (only their keys, at DEBUG).
@@ -39,8 +44,11 @@ from agent_engine.runtime.hooks.models import (
     HookInvocation,
     HookPoint,
     McpRequestContext,
+    McpResponseContext,
     RunContext,
+    RunEndContext,
     ToolCallContext,
+    ToolRequestContext,
 )
 
 logger = logging.getLogger(__name__)
@@ -161,6 +169,17 @@ class HookManager:
         for hook in self._hooks["on_engine_start"]:
             await self._invoke(hook, payload=context, positional=(context, hook.config))
 
+    async def run_engine_stop(self, context: EngineContext) -> None:
+        """Engine-stop hooks are best-effort: a failure is logged and never
+        prevents resource cleanup during shutdown."""
+        for hook in self._hooks["on_engine_stop"]:
+            try:
+                await self._invoke(hook, payload=context, positional=(context, hook.config))
+            except Exception:  # cleanup must proceed regardless
+                logger.exception(
+                    "on_engine_stop hook failed (continuing shutdown) ref=%s", hook.ref
+                )
+
     async def run_run_start(self, context: RunContext) -> RunContext:
         for hook in self._hooks["on_run_start"]:
             result = await self._invoke(
@@ -172,6 +191,53 @@ class HookManager:
             if isinstance(result, RunContext):
                 context = result
         return context
+
+    async def run_run_end(
+        self, run_context: RunContext | None, summary: RunEndContext
+    ) -> None:
+        """Run-end hooks observe a successful completion; return is ignored."""
+        for hook in self._hooks["on_run_end"]:
+            await self._invoke(
+                hook,
+                payload=summary,
+                run_context=run_context,
+                positional=(run_context, summary, hook.config),
+            )
+
+    async def run_before_tool_call(
+        self, run_context: RunContext | None, request: ToolRequestContext
+    ) -> None:
+        """Pre-call tool hooks are observe-only in this version; return ignored."""
+        for hook in self._hooks["before_tool_call"]:
+            await self._invoke(
+                hook,
+                payload=request,
+                run_context=run_context,
+                positional=(run_context, request, hook.config),
+            )
+
+    async def run_after_tool_call(
+        self, run_context: RunContext | None, call: ToolCallContext
+    ) -> None:
+        for hook in self._hooks["after_tool_call"]:
+            await self._invoke(
+                hook,
+                payload=call,
+                run_context=run_context,
+                positional=(run_context, call, hook.config),
+            )
+
+    async def run_on_tool_error(
+        self, run_context: RunContext | None, call: ToolCallContext
+    ) -> None:
+        """Tool-error hooks observe a failed tool call; return ignored."""
+        for hook in self._hooks["on_tool_error"]:
+            await self._invoke(
+                hook,
+                payload=call,
+                run_context=run_context,
+                positional=(run_context, call, hook.config),
+            )
 
     async def run_before_mcp_request(
         self, run_context: RunContext | None, request: McpRequestContext
@@ -187,15 +253,16 @@ class HookManager:
                 request = result
         return request
 
-    async def run_after_tool_call(
-        self, run_context: RunContext | None, call: ToolCallContext
+    async def run_after_mcp_response(
+        self, run_context: RunContext | None, response: McpResponseContext
     ) -> None:
-        for hook in self._hooks["after_tool_call"]:
+        """Post-response MCP hooks are observe-only (audit/metrics); return ignored."""
+        for hook in self._hooks["after_mcp_response"]:
             await self._invoke(
                 hook,
-                payload=call,
+                payload=response,
                 run_context=run_context,
-                positional=(run_context, call, hook.config),
+                positional=(run_context, response, hook.config),
             )
 
     async def run_run_error(self, run_context: RunContext | None, error: BaseException) -> None:

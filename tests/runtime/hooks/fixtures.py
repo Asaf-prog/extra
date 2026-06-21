@@ -135,8 +135,28 @@ def record_run_start(context: RunContext, config: dict[str, Any]) -> RunContext:
     return context.replace(metadata={**context.metadata, "seen": True})
 
 
+def record_before_tool_call(context: Any, request: Any, config: dict[str, Any]) -> None:
+    CALLS.append(("before_tool_call", request))
+
+
 def record_after_tool_call(context: Any, call: Any, config: dict[str, Any]) -> None:
     CALLS.append(("after_tool_call", call))
+
+
+def record_on_tool_error(context: Any, call: Any, config: dict[str, Any]) -> None:
+    CALLS.append(("on_tool_error", call))
+
+
+def record_run_end(context: Any, summary: Any, config: dict[str, Any]) -> None:
+    CALLS.append(("on_run_end", summary))
+
+
+def record_engine_stop(context: Any, config: dict[str, Any]) -> None:
+    CALLS.append(("on_engine_stop", context))
+
+
+def record_after_mcp_response(context: Any, response: Any, config: dict[str, Any]) -> None:
+    CALLS.append(("after_mcp_response", response))
 
 
 def record_run_error(context: Any, error: BaseException, config: dict[str, Any]) -> None:

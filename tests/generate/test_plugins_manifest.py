@@ -52,14 +52,9 @@ def test_creates_manifest_and_init_when_missing(tmp_path: Path) -> None:
     data = _read(path)
     assert data["package"]["name"]  # derived
     assert set(data["paths"]) == {"hooks", "resolvers", "tools"}
-    assert set(data["hooks"]) == {
-        "on_engine_start",
-        "on_run_start",
-        "before_mcp_request",
-        "after_tool_call",
-        "on_run_error",
-        "plugins",
-    }
+    from agent_engine.runtime.hooks.models import HOOK_POINTS
+
+    assert set(data["hooks"]) == {*HOOK_POINTS, "plugins"}
     assert data["hooks"]["plugins"] == {}
     assert data["resolvers"] == {}
     assert data["tools"] == {}

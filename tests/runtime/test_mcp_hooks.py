@@ -109,3 +109,61 @@ async def test_header_values_are_not_logged(caplog: pytest.LogCaptureFixture) ->
         await _apply(auth)
     assert "super-secret-xyz" not in caplog.text
     assert "Bearer" not in caplog.text
+
+
+# -- after_mcp_response (response seam: `response = yield request`) ----------
+
+
+async def _drive_with_response(
+    auth: httpx.Auth, status_code: int = 200
+) -> tuple[httpx.Request, httpx.Response]:
+    """Drive the auth flow through the full request→response cycle, exactly as
+    httpx does: __anext__() to get the request, then asend(response)."""
+    request = httpx.Request("POST", "https://internal.test/mcp")
+    flow = auth.async_auth_flow(request)
+    sent = await flow.__anext__()
+    response = httpx.Response(status_code, request=sent)
+    try:
+        await flow.asend(response)
+    except StopAsyncIteration:
+        pass
+    finally:
+        await flow.aclose()
+    return sent, response
+
+
+async def test_after_mcp_response_runs_with_status_and_latency() -> None:
+    from tests.runtime.hooks import fixtures
+
+    fixtures.CALLS.clear()
+    mgr = _manager(HookSpec("after_mcp_response", f"{_FIX}:record_after_mcp_response"))
+    auth = HookedMCPAuth(mgr, "internal-mcp")
+
+    await _drive_with_response(auth, status_code=503)
+
+    resp = next(c[1] for c in fixtures.CALLS if c[0] == "after_mcp_response")
+    assert resp.server_id == "internal-mcp"
+    assert resp.status_code == 503
+    assert resp.latency_ms is not None
+
+
+async def test_after_mcp_response_noop_without_hooks_completes_flow() -> None:
+    # No after_mcp_response hook: the response cycle still completes cleanly.
+    mgr = _manager()
+    auth = HookedMCPAuth(mgr, "internal-mcp")
+    _, response = await _drive_with_response(auth, status_code=200)
+    assert response.status_code == 200
+
+
+async def test_after_mcp_response_does_not_log_body_or_headers(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from tests.runtime.hooks import fixtures
+
+    fixtures.CALLS.clear()
+    mgr = _manager(HookSpec("after_mcp_response", f"{_FIX}:record_after_mcp_response"))
+    auth = HookedMCPAuth(mgr, "internal-mcp")
+    with caplog.at_level(logging.DEBUG):
+        await _drive_with_response(auth, status_code=200)
+    # Only status/latency are logged — never header values or a body.
+    assert "authorization" not in caplog.text.lower()
