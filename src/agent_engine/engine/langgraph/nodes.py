@@ -167,8 +167,13 @@ class AgentNode:
         run_context = current_run_context.get()
 
         log(
-            logger, logging.INFO, "tool call started",
-            agent=self._spec.id, tool=name, provider=provider, server=server_id,
+            logger,
+            logging.INFO,
+            "tool call started",
+            agent=self._spec.id,
+            tool=name,
+            provider=provider,
+            server=server_id,
         )
         await self._hook_manager.run_before_tool_call(
             run_context,
@@ -194,8 +199,14 @@ class AgentNode:
                 )
             )
             log(
-                logger, logging.WARNING, "tool call failed",
-                agent=self._spec.id, tool=name, provider=provider, server=server_id, ms=latency_ms,
+                logger,
+                logging.WARNING,
+                "tool call failed",
+                agent=self._spec.id,
+                tool=name,
+                provider=provider,
+                server=server_id,
+                ms=latency_ms,
             )
             await self._hook_manager.run_on_tool_error(
                 run_context,
@@ -222,8 +233,14 @@ class AgentNode:
             )
         )
         log(
-            logger, logging.INFO, "tool call ended",
-            agent=self._spec.id, tool=name, provider=provider, server=server_id, ms=latency_ms,
+            logger,
+            logging.INFO,
+            "tool call ended",
+            agent=self._spec.id,
+            tool=name,
+            provider=provider,
+            server=server_id,
+            ms=latency_ms,
         )
         await self._hook_manager.run_after_tool_call(
             run_context,

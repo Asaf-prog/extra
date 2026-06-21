@@ -12,9 +12,7 @@ logger = logging.getLogger("agent_engine.trace")
 
 
 class LoggingCallbackHandler(BaseCallbackHandler):
-    def on_llm_start(
-        self, serialized: dict[str, Any], prompts: list[str], **kwargs: Any
-    ) -> None:
+    def on_llm_start(self, serialized: dict[str, Any], prompts: list[str], **kwargs: Any) -> None:
         model = (serialized or {}).get("name") or (kwargs.get("invocation_params") or {}).get(
             "model"
         )
@@ -30,9 +28,7 @@ class LoggingCallbackHandler(BaseCallbackHandler):
     def on_llm_error(self, error: BaseException, **kwargs: Any) -> None:
         log(logger, logging.ERROR, "llm error", error=str(error))
 
-    def on_tool_start(
-        self, serialized: dict[str, Any], input_str: str, **kwargs: Any
-    ) -> None:
+    def on_tool_start(self, serialized: dict[str, Any], input_str: str, **kwargs: Any) -> None:
         log(logger, logging.INFO, "tool start", name=(serialized or {}).get("name", "?"))
         log(logger, logging.DEBUG, "tool input", value=input_str[:300])
 

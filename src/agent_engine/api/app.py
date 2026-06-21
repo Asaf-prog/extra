@@ -110,17 +110,29 @@ def create_app(config_path: str) -> FastAPI:
         rid = _begin_request(x_request_id)
         response.headers["X-Request-ID"] = rid
         started = time.perf_counter()
-        log(logger, logging.INFO, "request start", endpoint="invoke",
-            chars=len(body.message), message=_preview(body.message))
+        log(
+            logger,
+            logging.INFO,
+            "request start",
+            endpoint="invoke",
+            chars=len(body.message),
+            message=_preview(body.message),
+        )
         try:
             result = await _engine.run(body.message)
         except Exception as exc:
             log(logger, logging.ERROR, "request end", status="error", error=str(exc))
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        log(logger, logging.INFO, "request end", status="ok",
+        log(
+            logger,
+            logging.INFO,
+            "request end",
+            status="ok",
             duration_ms=int((time.perf_counter() - started) * 1000),
-            route=" → ".join(result.visited), tools=len(result.used_tools),
-            answer_chars=len(result.answer))
+            route=" → ".join(result.visited),
+            tools=len(result.used_tools),
+            answer_chars=len(result.answer),
+        )
         return InvokeResponse(
             system_name=result.system_name,
             answer=result.answer,
@@ -136,16 +148,27 @@ def create_app(config_path: str) -> FastAPI:
         assert _engine is not None
         rid = _begin_request(x_request_id)
         started = time.perf_counter()
-        log(logger, logging.INFO, "request start", endpoint="stream",
-            chars=len(body.message), message=_preview(body.message))
+        log(
+            logger,
+            logging.INFO,
+            "request start",
+            endpoint="stream",
+            chars=len(body.message),
+            message=_preview(body.message),
+        )
 
         async def event_stream():
             try:
                 async for event in _engine.stream(body.message):
                     payload = {k: v for k, v in dataclasses.asdict(event).items() if v is not None}
                     yield f"data: {json.dumps(payload)}\n\n"
-                log(logger, logging.INFO, "request end", status="ok",
-                    duration_ms=int((time.perf_counter() - started) * 1000))
+                log(
+                    logger,
+                    logging.INFO,
+                    "request end",
+                    status="ok",
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                )
             except Exception as exc:
                 log(logger, logging.ERROR, "request end", status="error", error=str(exc))
                 yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"

@@ -120,7 +120,9 @@ class LangGraphEngine(Engine):
         nodes = walk(spec.graph)
         agents = [n for n in nodes if isinstance(n.node, AgentSpec)]
         log(
-            logger, logging.INFO, "system ready",
+            logger,
+            logging.INFO,
+            "system ready",
             system=self._system_name,
             agents=len(agents),
             orchestrators=len(nodes) - len(agents),
@@ -170,15 +172,23 @@ class LangGraphEngine(Engine):
                 ctx, _run_end_context(self._system_name, ctx, run_result)
             )
             log(
-                logger, logging.INFO, "run ended",
-                run_id=ctx.run_id, system=self._system_name,
-                visited=len(run_result.visited), tools=len(run_result.used_tools),
+                logger,
+                logging.INFO,
+                "run ended",
+                run_id=ctx.run_id,
+                system=self._system_name,
+                visited=len(run_result.visited),
+                tools=len(run_result.used_tools),
             )
             return run_result
         except Exception as exc:
             log(
-                logger, logging.WARNING, "run failed",
-                run_id=ctx.run_id, system=self._system_name, error=type(exc).__name__,
+                logger,
+                logging.WARNING,
+                "run failed",
+                run_id=ctx.run_id,
+                system=self._system_name,
+                error=type(exc).__name__,
             )
             await hook_manager.run_run_error(ctx, exc)
             raise
@@ -225,14 +235,22 @@ class LangGraphEngine(Engine):
                     ),
                 )
                 log(
-                    logger, logging.INFO, "run ended",
-                    run_id=ctx.run_id, system=self._system_name,
-                    visited=len(visited), tools=len(used_tools),
+                    logger,
+                    logging.INFO,
+                    "run ended",
+                    run_id=ctx.run_id,
+                    system=self._system_name,
+                    visited=len(visited),
+                    tools=len(used_tools),
                 )
             except Exception as exc:
                 log(
-                    logger, logging.WARNING, "run failed",
-                    run_id=ctx.run_id, system=self._system_name, error=type(exc).__name__,
+                    logger,
+                    logging.WARNING,
+                    "run failed",
+                    run_id=ctx.run_id,
+                    system=self._system_name,
+                    error=type(exc).__name__,
                 )
                 await hook_manager.run_run_error(ctx, exc)
                 queue.put_nowait(exc)
@@ -266,6 +284,7 @@ class LangGraphEngine(Engine):
         from langchain_mcp_adapters.client import MultiServerMCPClient
 
         from agent_engine.loaders.mcp_auth_loader import MCPAuthLoader
+        from agent_engine.loaders.mcp_tags import apply_tool_tags
         from agent_engine.runtime.hooks import HookedMCPAuth
 
         auth_loader = MCPAuthLoader(self._base_dir)
@@ -281,15 +300,40 @@ class LangGraphEngine(Engine):
             if auth is not None:
                 config["auth"] = auth
 
+            # Optional, per-server tool-discovery tags. No tags -> unchanged.
+            # Tags without a usable transport raise here (fail-closed at build).
+            if mcp_spec.tool_tags:
+                transport = mcp_spec.tool_tag_transport
+                config = apply_tool_tags(config, mcp_spec.tool_tags, transport, server_id=server_id)
+                log(
+                    logger,
+                    logging.INFO,
+                    "mcp tool_tags configured",
+                    server=server_id,
+                    tags=len(mcp_spec.tool_tags),
+                    transport=transport.type if transport else "",
+                )
+
             client = MultiServerMCPClient({server_id: config})  # type: ignore[dict-item]
             self._mcp_clients[server_id] = client
             try:
+                log(logger, logging.INFO, "mcp discovery started", server=server_id)
                 mcp_tools[server_id] = await client.get_tools()
-                log(logger, logging.INFO, "mcp connected", server=server_id,
-                    tools=len(mcp_tools[server_id]))
+                log(
+                    logger,
+                    logging.INFO,
+                    "mcp connected",
+                    server=server_id,
+                    tools=len(mcp_tools[server_id]),
+                )
             except Exception as exc:
-                log(logger, logging.WARNING, "mcp unreachable", server=server_id,
-                    reason=_root_cause(exc))
+                log(
+                    logger,
+                    logging.WARNING,
+                    "mcp unreachable",
+                    server=server_id,
+                    reason=_root_cause(exc),
+                )
                 mcp_tools[server_id] = []
         return mcp_tools
 

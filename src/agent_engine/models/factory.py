@@ -28,8 +28,14 @@ def build_chat_model(
 
     Switching providers is a configuration change, not a code change.
     """
-    log(logger, logging.INFO, "llm configured", provider=provider, model=name,
-        temperature=temperature)
+    log(
+        logger,
+        logging.INFO,
+        "llm configured",
+        provider=provider,
+        model=name,
+        temperature=temperature,
+    )
     if temperature is None:
         return init_chat_model(name, model_provider=provider)
     return init_chat_model(name, model_provider=provider, temperature=temperature)

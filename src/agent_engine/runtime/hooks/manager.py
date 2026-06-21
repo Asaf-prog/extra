@@ -192,9 +192,7 @@ class HookManager:
                 context = result
         return context
 
-    async def run_run_end(
-        self, run_context: RunContext | None, summary: RunEndContext
-    ) -> None:
+    async def run_run_end(self, run_context: RunContext | None, summary: RunEndContext) -> None:
         """Run-end hooks observe a successful completion; return is ignored."""
         for hook in self._hooks["on_run_end"]:
             await self._invoke(

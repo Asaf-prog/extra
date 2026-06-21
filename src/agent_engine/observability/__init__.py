@@ -1,4 +1,5 @@
 """Pluggable LangChain-callback observability backends, injected into the engine."""
+
 from __future__ import annotations
 
 from agent_engine.observability.provider import CallbackProvider
