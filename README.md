@@ -9,8 +9,8 @@
 runtime, prompt rendering, resolver/tool plugins, remote **MCP** tools (with
 optional tool tags), **runtime hooks** (incl. `before_mcp_request` auth-header
 injection), structured logging, the HTTP API (`serve`), and the CLI
-(`validate`, `inspect`, `generate`, `run`, `serve`) are **implemented**.
-Deployment/Docker and richer observability are still planned.
+(`validate`, `inspect`, `generate`, `run`, `serve`, `chat`) are **implemented**.
+A Docker image is provided; richer observability is still planned.
 
 ---
 
@@ -49,11 +49,10 @@ per-phase status.
 | Runtime hooks                 | ✅ Implemented — 10 lifecycle points, sync/async, fail-closed |
 | MCP auth (`before_mcp_request`) | ✅ Implemented — `HookedMCPAuth` header injection, no token in prompts |
 | Plugin `import_roots`         | ✅ Implemented — CWD-independent package imports |
-| Access plugin                 | 🔶 Partial — `protected` child filtering wired; request-context gate minimal |
-| CLI                           | ✅ `validate`, `inspect`, `generate`, `run`, `serve` |
+| CLI                           | ✅ `validate`, `inspect`, `generate`, `run`, `serve`, `chat` |
 | HTTP API (`serve`)            | ✅ Implemented — `/invoke`, `/stream` |
 | Observability                 | ✅ Implemented — pluggable LangChain callbacks; logging backend + **Langfuse** tracing (env-enabled) |
-| Deployment / Docker           | ⏳ Planned |
+| Docker image                  | ✅ Implemented — `Dockerfile` + `entrypoint.sh`, defaults to `serve` |
 
 ## 4. Capabilities at a glance
 
@@ -215,11 +214,6 @@ package (`plugins/` — `hooks/`, `resolvers/`, `tools/`) described by one manif
 - **Hook plugins** are trusted lifecycle code run automatically by the runtime
   (auth, policy, audit) — **never** exposed to the LLM. See
   [docs/RUNTIME_HOOKS.md](docs/RUNTIME_HOOKS.md).
-- **Access plugin** — a node may set `protected: true`; if any protected node
-  exists, the engine filters those children through
-  `plugins/access.py::AccessResolver.can_access(ctx, node_id)`. Child filtering
-  is wired; the request-context gate that populates `ctx` is still minimal. See
-  [docs/SIDECAR_CONTEXT_AUTH.md](docs/SIDECAR_CONTEXT_AUTH.md).
 
 `agentctl generate` scaffolds the stubs and creates/updates `plugins.toml`.
 Package-path refs (e.g. `examples.plugins.hooks.mcp_auth:McpAuthHook`) are made
@@ -276,7 +270,7 @@ loudly. Prompt text is **not** a security boundary. See
 ```text
 agent.yml → YAML Loader → Validator → Compiler → CompiledAgentGraph
           → RuntimeEngine (built once) → per-request RunContext
-          → access filtering → resolver context → prompt rendering
+          → resolver context → prompt rendering
           → supervisor execution → tools / MCP (+ hooks) → response + trace
 ```
 
@@ -329,9 +323,9 @@ In PyCharm/VS Code, point the interpreter at `<repo>/.venv/bin/python` and mark
 ## 14. Roadmap
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the phased plan. Foundation → spec &
-validation → compiler → runtime → prompts → plugin access/context → tools/MCP →
-hooks → CLI/API → observability (logging + Langfuse) are implemented;
-deployment/Docker and additional tracing backends are planned.
+validation → compiler → runtime → prompts → plugin context → tools/MCP →
+hooks → CLI/API → observability (logging + Langfuse) → Docker image are
+implemented; additional tracing backends are planned.
 
 ## License
 
