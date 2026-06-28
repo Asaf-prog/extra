@@ -16,6 +16,8 @@ Error policy (fail-closed by default, per hook ``failure_policy``):
   * ``before_tool_call`` failure  -> the run fails.
   * ``after_tool_call`` failure   -> the run fails (use ``failure_policy: warn``
     for best-effort audit hooks).
+  * ``transform_tool_result`` fail-> the run fails (use ``failure_policy: warn``
+    to pass the original, untransformed result through instead).
   * ``on_tool_error`` failure     -> the run fails (use ``failure_policy: warn``).
   * ``before_mcp_request`` fail   -> the MCP request fails.
   * ``after_mcp_response`` fail   -> the MCP request fails (observe-only payload).
@@ -48,6 +50,7 @@ from agent_engine.runtime.hooks.models import (
     RunEndContext,
     ToolCallContext,
     ToolRequestContext,
+    ToolResultContext,
 )
 
 logger = logging.getLogger(__name__)
@@ -226,6 +229,27 @@ class HookManager:
                 run_context=run_context,
                 positional=(run_context, call, hook.config),
             )
+
+    async def run_transform_tool_result(
+        self, run_context: RunContext | None, result: ToolResultContext
+    ) -> ToolResultContext:
+        """Transform a successful tool result before it reaches the conversation.
+
+        Mirrors ``run_before_mcp_request``: each hook may return a (possibly
+        modified) ``ToolResultContext``; the returned value is fed to the next
+        hook, so transforms compose in declaration order. A hook that returns
+        ``None`` (e.g. a ``warn`` hook that failed) leaves the result unchanged.
+        """
+        for hook in self._hooks["transform_tool_result"]:
+            transformed = await self._invoke(
+                hook,
+                payload=result,
+                run_context=run_context,
+                positional=(run_context, result, hook.config),
+            )
+            if isinstance(transformed, ToolResultContext):
+                result = transformed
+        return result
 
     async def run_on_tool_error(
         self, run_context: RunContext | None, call: ToolCallContext

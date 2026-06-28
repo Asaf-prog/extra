@@ -15,6 +15,7 @@ from agent_engine.runtime.hooks.models import (
     McpRequestContext,
     RunContext,
     ToolCallContext,
+    ToolResultContext,
 )
 from tests.runtime.hooks import fixtures
 
@@ -349,6 +350,25 @@ def test_has_reports_declared_points() -> None:
 
 # -- lifecycle coverage ------------------------------------------------------
 
+
+async def test_transform_tool_result_returns_modified_result() -> None:
+    mgr = _manager(
+        HookSpec("transform_tool_result", f"{_FIX}:truncate_tool_result", config={"limit": 3})
+    )
+    out = await mgr.run_transform_tool_result(
+        None, ToolResultContext("a", "t", "mcp", result="abcdefgh")
+    )
+    assert out.result == "abc"  # truncated to the configured limit
+
+
+async def test_transform_tool_result_warn_failure_keeps_original() -> None:
+    # A failing transform under failure_policy=warn must not alter the result.
+    mgr = _manager(HookSpec("transform_tool_result", f"{_FIX}:boom", failure_policy="warn"))
+    original = ToolResultContext("a", "t", "mcp", result="keep-me")
+    out = await mgr.run_transform_tool_result(None, original)
+    assert out is original
+
+
 _RUN_METHOD = {
     "on_engine_start": "run_engine_start",
     "on_engine_stop": "run_engine_stop",
@@ -357,6 +377,7 @@ _RUN_METHOD = {
     "on_run_error": "run_run_error",
     "before_tool_call": "run_before_tool_call",
     "after_tool_call": "run_after_tool_call",
+    "transform_tool_result": "run_transform_tool_result",
     "on_tool_error": "run_on_tool_error",
     "before_mcp_request": "run_before_mcp_request",
     "after_mcp_response": "run_after_mcp_response",

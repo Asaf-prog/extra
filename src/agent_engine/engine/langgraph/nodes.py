@@ -31,6 +31,7 @@ from agent_engine.runtime.hooks import (
     HookManager,
     ToolCallContext,
     ToolRequestContext,
+    ToolResultContext,
     current_run_context,
 )
 from agent_engine.runtime.state import GraphState
@@ -253,7 +254,25 @@ class AgentNode:
                 latency_ms=latency_ms,
             ),
         )
-        return str(result)
+
+        result_text = str(result)
+        # transform_tool_result hooks may reshape the result (e.g. truncate
+        # oversized MCP output) before it is appended to the conversation. Gated
+        # so ToolResultContext is only allocated when a hook exists.
+        if self._hook_manager.has("transform_tool_result"):
+            transformed = await self._hook_manager.run_transform_tool_result(
+                run_context,
+                ToolResultContext(
+                    agent_id=self._spec.id,
+                    tool_name=name,
+                    provider=provider,
+                    result=result_text,
+                    server_id=server_id,
+                    latency_ms=latency_ms,
+                ),
+            )
+            result_text = transformed.result
+        return result_text
 
 
 class OrchestratorNode:

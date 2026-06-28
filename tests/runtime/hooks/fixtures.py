@@ -9,7 +9,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from agent_engine.runtime.hooks.models import HookInvocation, McpRequestContext, RunContext
+from agent_engine.runtime.hooks.models import (
+    HookInvocation,
+    McpRequestContext,
+    RunContext,
+    ToolResultContext,
+)
 
 # A module-level sink so side-effect hooks can be observed without globals in
 # the test bodies. Tests clear it before use.
@@ -161,3 +166,16 @@ def record_after_mcp_response(context: Any, response: Any, config: dict[str, Any
 
 def record_run_error(context: Any, error: BaseException, config: dict[str, Any]) -> None:
     CALLS.append(("on_run_error", error))
+
+
+def truncate_tool_result(
+    context: RunContext | None, result: ToolResultContext, config: dict[str, Any]
+) -> ToolResultContext:
+    """transform_tool_result hook: record the (full) result, then truncate it to
+    ``config['limit']`` chars. Returns the modified context so the engine appends
+    the truncated text to the conversation."""
+    CALLS.append(("transform_tool_result", result))
+    limit = int(config.get("limit", 100))
+    if len(result.result) <= limit:
+        return result
+    return result.with_result(result.result[:limit])

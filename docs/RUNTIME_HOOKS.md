@@ -43,6 +43,7 @@ explicit-ref mode) and whether a returned value is used.
 | `on_run_error` | when a run fails | the `BaseException` | ignored (never masks the error) |
 | `before_tool_call` | before every local or MCP tool call | `ToolRequestContext` | ignored (observe-only) |
 | `after_tool_call` | after a local or MCP tool call **succeeds** | `ToolCallContext` (status `succeeded`) | ignored |
+| `transform_tool_result` | after a tool **succeeds**, before its result is appended to the conversation | `ToolResultContext` (carries the `result`) | updated `ToolResultContext` (or `None`) |
 | `on_tool_error` | when a local or MCP tool call **fails** | `ToolCallContext` (status `failed`) | ignored |
 | `before_mcp_request` | before every outgoing MCP HTTP request | `McpRequestContext` | updated `McpRequestContext` (or `None`) |
 | `after_mcp_response` | after every MCP HTTP response | `McpResponseContext` | ignored (observe-only) |
@@ -180,7 +181,8 @@ class McpAuthHook:
 
 The `payload` is hook-specific: `EngineContext` for `on_engine_start`,
 `RunContext` for `on_run_start`, `McpRequestContext` for `before_mcp_request`,
-`ToolCallContext` for `after_tool_call`, and the exception for `on_run_error`.
+`ToolCallContext` for `after_tool_call`, `ToolResultContext` for
+`transform_tool_result`, and the exception for `on_run_error`.
 
 Class-hook instances may keep safe long-lived state such as config, initialized
 clients, tenant metadata, keyed caches, or audit/metrics clients. They must not
@@ -306,6 +308,10 @@ def after_tool_call(
     context: RunContext | None, call: ToolCallContext, config: dict
 ) -> None: ...
 
+def transform_tool_result(
+    context: RunContext | None, result: ToolResultContext, config: dict
+) -> ToolResultContext | None: ...
+
 def on_run_error(
     context: RunContext | None, error: BaseException, config: dict
 ) -> None: ...
@@ -313,7 +319,8 @@ def on_run_error(
 
 Return values are interpreted by hook point: `on_run_start` may return an
 updated `RunContext`; `before_mcp_request` may return an updated
-`McpRequestContext`; `None` keeps the original object. **All other points are
+`McpRequestContext`; `transform_tool_result` may return an updated
+`ToolResultContext`; `None` keeps the original object. **All other points are
 observe-only — their return value is ignored.** (Mutating a pending tool call or
 an MCP response is not supported in this version.)
 
@@ -330,13 +337,15 @@ EngineContext(system_name, metadata)
 RunEndContext(run_id, system_name, status, visited, used_tool_count, metadata)
 ToolRequestContext(agent_id, tool_name, provider, server_id, metadata)
 ToolCallContext(agent_id, tool_name, provider, server_id, status, latency_ms, error, metadata)
+ToolResultContext(agent_id, tool_name, provider, result, server_id, latency_ms, metadata)
 McpRequestContext(server_id, url, operation, tool_name, headers, metadata)
 McpResponseContext(server_id, url, status_code, operation, tool_name, latency_ms, metadata)
 ```
 
 All are frozen dataclasses. `RunContext.replace(**changes)` and
-`McpRequestContext.with_headers({...})` return updated copies; the `headers` and
-`metadata` dicts may also be mutated in place. Hooks never receive raw graph
+`McpRequestContext.with_headers({...})` and `ToolResultContext.with_result(...)`
+return updated copies; the `headers` and `metadata` dicts may also be mutated in
+place. Hooks never receive raw graph
 state.
 
 ---
@@ -444,6 +453,7 @@ Fail-closed by default — security hooks must not be silently skipped:
 | `on_run_end` | the run's success path fails |
 | `before_tool_call` | the run fails (a policy gate can block the call) |
 | `after_tool_call` | the run fails |
+| `transform_tool_result` | the run fails (use `warn` to pass the original result through) |
 | `on_tool_error` | the run fails |
 | `before_mcp_request` | the MCP request fails |
 | `after_mcp_response` | the MCP request fails |
@@ -510,4 +520,6 @@ without those words — e.g. `credential_env: INTERNAL_MCP_CREDENTIAL` rather th
 Full OAuth, a token store, secret-manager integration, an RBAC/policy DSL,
 approval workflows, hook sandboxing, running untrusted hooks safely, and
 distributed hook execution are all out of scope. `after_tool_call` is
-side-effect only and does not alter tool results.
+side-effect only and does not alter tool results — use `transform_tool_result`
+to reshape a result (e.g. truncate oversized MCP output) before it reaches the
+conversation.

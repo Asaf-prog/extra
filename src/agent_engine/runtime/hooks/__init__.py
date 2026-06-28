@@ -31,6 +31,7 @@ from agent_engine.runtime.hooks.models import (
     RunEndContext,
     ToolCallContext,
     ToolRequestContext,
+    ToolResultContext,
 )
 
 __all__ = [
@@ -53,5 +54,6 @@ __all__ = [
     "RunEndContext",
     "ToolCallContext",
     "ToolRequestContext",
+    "ToolResultContext",
     "current_run_context",
 ]

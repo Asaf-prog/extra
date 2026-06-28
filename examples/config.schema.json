@@ -157,6 +157,12 @@
             "$ref": "#/$defs/hookEntry"
           }
         },
+        "transform_tool_result": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hookEntry"
+          }
+        },
         "on_run_error": {
           "type": "array",
           "items": {

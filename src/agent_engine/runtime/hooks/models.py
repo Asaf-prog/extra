@@ -23,6 +23,7 @@ HookPoint = Literal[
     "on_run_error",
     "before_tool_call",
     "after_tool_call",
+    "transform_tool_result",
     "on_tool_error",
     "before_mcp_request",
     "after_mcp_response",
@@ -36,6 +37,7 @@ HOOK_POINTS: tuple[HookPoint, ...] = (
     "on_run_error",
     "before_tool_call",
     "after_tool_call",
+    "transform_tool_result",
     "on_tool_error",
     "before_mcp_request",
     "after_mcp_response",
@@ -221,3 +223,30 @@ class ToolCallContext:
     latency_ms: int | None = None
     error: str | None = None
     metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ToolResultContext:
+    """A successful tool call's result, passed to ``transform_tool_result`` hooks
+    *after the tool returns and before the result is appended to the agent
+    conversation*.
+
+    Unlike the observe-only ``after_tool_call`` (which never sees results), this
+    hook is given the tool's ``result`` text precisely so it can shape it —
+    truncating oversized MCP output, redacting, normalizing — and **must return a
+    ``ToolResultContext``** carrying the original or modified ``result``. Because it
+    handles raw tool output it is trusted code that may see sensitive content;
+    never log the ``result`` body, only safe metadata (sizes, names, ids).
+    """
+
+    agent_id: str
+    tool_name: str
+    provider: ToolProvider
+    result: str
+    server_id: str | None = None
+    latency_ms: int | None = None
+    metadata: dict[str, object] = field(default_factory=dict)
+
+    def with_result(self, result: str) -> ToolResultContext:
+        """Return a copy with ``result`` replaced (immutable update)."""
+        return dataclasses.replace(self, result=result)

@@ -163,6 +163,71 @@ async def test_on_tool_error_runs_on_local_tool_failure(tmp_path: Path, model_fa
     assert call.provider == "local"
 
 
+class EchoToolResultModel:
+    """Calls the tool once, then answers with the tool result it was given.
+
+    This lets a test observe exactly what text reached the conversation after
+    ``transform_tool_result`` ran.
+    """
+
+    def __init__(self, tool_names: list[str] | None = None) -> None:
+        self._tool_names = tool_names or []
+
+    def bind_tools(self, tools: list[Any]) -> EchoToolResultModel:
+        return EchoToolResultModel([t.name for t in tools])
+
+    async def ainvoke(self, messages: list[Any]) -> AIMessage:
+        return self._respond(messages)
+
+    async def astream(self, messages: list[Any]) -> AsyncIterator[AIMessage]:
+        yield self._respond(messages)
+
+    def _respond(self, messages: list[Any]) -> AIMessage:
+        tool_msgs = [m for m in messages if isinstance(m, ToolMessage)]
+        if self._tool_names and not tool_msgs:
+            return AIMessage(
+                content="",
+                tool_calls=[ToolCall(name=self._tool_names[0], args={"message": "x"}, id="c1")],
+            )
+        return AIMessage(content=tool_msgs[-1].content if tool_msgs else "no-tool")
+
+
+def _write_long_tool(base_dir: Path, tool_id: str, size: int) -> None:
+    body = f"def {tool_id}(message: str) -> str:\n    return 'Y' * {size}\n"
+    tools_dir = base_dir / "plugins" / "tools"
+    tools_dir.mkdir(parents=True, exist_ok=True)
+    (tools_dir / f"{tool_id}.py").write_text(body, encoding="utf-8")
+
+
+async def test_transform_tool_result_truncates_result_reaching_conversation(
+    tmp_path: Path,
+) -> None:
+    # Tool returns 5000 chars; the transform hook truncates to 100.
+    _write_long_tool(tmp_path, "big_tool", 5000)
+    spec = _system(
+        _agent("research", tools=(ToolSpec("big_tool", "big"),)),
+        HookSpec(
+            "transform_tool_result",
+            f"{_FIX}:truncate_tool_result",
+            config={"limit": 100},
+        ),
+    )
+
+    def factory(provider: str, name: str, temperature: float | None) -> BaseChatModel:
+        return cast(BaseChatModel, EchoToolResultModel())
+
+    async with LangGraphEngine(tmp_path, model_factory=factory) as engine:
+        await engine.build(spec)
+        result = await engine.run("go")
+
+    # The hook saw the full 5000-char result...
+    transformed = next(c[1] for c in fixtures.CALLS if c[0] == "transform_tool_result")
+    assert len(transformed.result) == 5000
+    assert transformed.tool_name == "big_tool"
+    # ...and the conversation (echoed by the model) received the truncated 100.
+    assert result.answer == "Y" * 100
+
+
 async def test_after_tool_call_receives_provider_and_server_id(
     tmp_path: Path, model_factory: Any
 ) -> None:
