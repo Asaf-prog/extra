@@ -51,6 +51,7 @@ dependencies = [
     "langchain-mcp-adapters>=0.1",
     "python-dotenv>=1.0",
     "langchain-anthropic (>=1.4.5,<2.0.0)",
+    "langchain-aws>=0.2",
     "sqlmodel>=0.0.16",
     "sqlalchemy[asyncio]>=2.0",
     "aiosqlite>=0.19",
@@ -68,6 +69,7 @@ dev = [
 # `model.provider` references. `init_chat_model` imports it lazily.
 anthropic = ["langchain-anthropic>=0.3"]
 openai = ["langchain-openai>=0.3"]
+bedrock = ["langchain-aws>=0.2"]
 langfuse = ["langfuse>=2.0"]
 # PostgreSQL backend for agent_manager: pip install ".[postgres]" + set
 # DATABASE_URL=postgresql+asyncpg://...

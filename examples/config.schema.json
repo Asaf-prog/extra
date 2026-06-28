@@ -231,10 +231,15 @@
       "properties": {
         "provider": {
           "type": "string",
-          "description": "Model provider identifier (e.g. anthropic, openai)."
+          "enum": [
+            "anthropic",
+            "bedrock"
+          ],
+          "description": "Model provider identifier. Supported providers: anthropic, bedrock."
         },
         "name": {
           "type": "string",
+          "minLength": 1,
           "description": "Model name/id for the provider."
         },
         "temperature": {
@@ -242,6 +247,22 @@
           "minimum": 0,
           "maximum": 2,
           "description": "Sampling temperature. Optional; provider default applies if omitted."
+        },
+        "region": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Provider-specific region. For provider: bedrock, AWS_REGION or AWS_DEFAULT_REGION may be used when omitted."
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optional provider-specific max token limit."
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Optional provider-specific nucleus sampling value."
         }
       }
     },

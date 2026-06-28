@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -16,6 +17,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from agent_engine.core.execution import ExecutionPolicy
 from agent_engine.core.spec import AgentSpec, GraphNode, OrchestratorSpec, SystemSpec
+from agent_engine.core.spec import ModelConfig as NodeModelConfig
 from agent_engine.engine.engine import Engine
 from agent_engine.engine.langgraph.filters import AccessFilter, RouteFilter
 from agent_engine.engine.langgraph.helpers import (
@@ -46,7 +48,8 @@ from agent_engine.runtime.streaming import RunStreamEvent
 
 logger = logging.getLogger(__name__)
 
-ModelFactory = Callable[[str, str, float | None], BaseChatModel]
+ModelFactory = Callable[..., BaseChatModel]
+_MODEL_FACTORY_OPTIONAL_KWARGS = ("region", "max_tokens", "top_p")
 
 
 def _root_cause(exc: BaseException) -> str:
@@ -94,6 +97,28 @@ def _run_end_context(system_name: str, ctx: RunContext, result: RunResult) -> Ru
         visited=tuple(result.visited),
         used_tool_count=len(result.used_tools),
     )
+
+
+def _model_factory_kwargs(factory: ModelFactory, model: NodeModelConfig) -> dict[str, object]:
+    optional = {
+        "region": model.region,
+        "max_tokens": model.max_tokens,
+        "top_p": model.top_p,
+    }
+    present: dict[str, object] = {
+        key: value for key, value in optional.items() if value is not None
+    }
+    if not present:
+        return {}
+    try:
+        signature = inspect.signature(factory)
+    except (TypeError, ValueError):
+        return present
+    parameters = signature.parameters.values()
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters):
+        return present
+    accepted = set(signature.parameters)
+    return {key: value for key, value in present.items() if key in accepted}
 
 
 class LangGraphEngine(Engine):
@@ -399,7 +424,7 @@ class LangGraphEngine(Engine):
         assert isinstance(node.node, OrchestratorSpec)
         spec = node.node
         path = node_id(node, parent_path)
-        model = self._model_factory(spec.model.provider, spec.model.name, spec.model.temperature)
+        model = self._build_model(spec.model)
 
         children: list[ChildEntry] = []
         for child in node.children:
@@ -431,7 +456,7 @@ class LangGraphEngine(Engine):
         assert self._resolver_loader is not None
         assert self._hook_manager is not None
         tools, mcp_names, server_by_tool = self._build_agent_tools(spec)
-        model = self._model_factory(spec.model.provider, spec.model.name, spec.model.temperature)
+        model = self._build_model(spec.model)
         bound_model = model.bind_tools(tools) if tools else model
         return AgentNode(
             spec=spec,
@@ -443,6 +468,14 @@ class LangGraphEngine(Engine):
             resolver_loader=self._resolver_loader,
             hook_manager=self._hook_manager,
             base_dir=self._base_dir,
+        )
+
+    def _build_model(self, model: NodeModelConfig) -> BaseChatModel:
+        return self._model_factory(
+            model.provider,
+            model.name,
+            model.temperature,
+            **_model_factory_kwargs(self._model_factory, model),
         )
 
     def _build_agent_tools(

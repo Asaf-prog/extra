@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from agent_engine.parsers.yaml.parser import YAMLParser
 from agentctl.diagnostics import validate_spec
 from agentctl.main import cli
 
@@ -93,6 +94,69 @@ def test_validate_offline_for_unreachable_mcp(tmp_path: Path) -> None:
     result = validate_spec(spec)
     assert result.ok, result.errors
     assert result.mcp_servers == 1
+
+
+def test_validate_accepts_bedrock_model_config(tmp_path: Path) -> None:
+    spec = _write(
+        tmp_path,
+        "system: {name: t}\n"
+        "defaults:\n"
+        "  model:\n"
+        "    provider: bedrock\n"
+        "    name: anthropic.claude-3-5-haiku-20241022-v1:0\n"
+        "    region: us-east-1\n"
+        "    temperature: 0.0\n"
+        "    max_tokens: 512\n"
+        "    top_p: 0.8\n"
+        "agents: {a: {description: d}}\n"
+        "graph: {a: }\n",
+    )
+
+    result = validate_spec(spec)
+
+    assert result.ok, result.errors
+
+
+def test_yaml_parser_preserves_bedrock_model_fields(tmp_path: Path) -> None:
+    spec_path = _write(
+        tmp_path,
+        "system: {name: t}\n"
+        "defaults:\n"
+        "  model:\n"
+        "    provider: bedrock\n"
+        "    name: anthropic.claude-3-5-haiku-20241022-v1:0\n"
+        "    region: us-east-1\n"
+        "    temperature: 0.0\n"
+        "    max_tokens: 512\n"
+        "    top_p: 0.8\n"
+        "agents: {a: {description: d}}\n"
+        "graph: {a: }\n",
+    )
+
+    spec = YAMLParser().parse(spec_path)
+
+    model = spec.graph.node.model
+    assert model.provider == "bedrock"
+    assert model.name == "anthropic.claude-3-5-haiku-20241022-v1:0"
+    assert model.region == "us-east-1"
+    assert model.temperature == 0.0
+    assert model.max_tokens == 512
+    assert model.top_p == 0.8
+
+
+def test_validate_rejects_unsupported_model_provider(tmp_path: Path) -> None:
+    spec = _write(
+        tmp_path,
+        "system: {name: t}\n"
+        "defaults: {model: {provider: openai, name: gpt-4o-mini}}\n"
+        "agents: {a: {description: d}}\n"
+        "graph: {a: }\n",
+    )
+
+    result = validate_spec(spec)
+
+    assert not result.ok
+    assert any("provider" in error and "bedrock" in error for error in result.errors)
 
 
 # -- failing specs -----------------------------------------------------------

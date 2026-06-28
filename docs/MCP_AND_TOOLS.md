@@ -308,8 +308,23 @@ agentctl run --config examples/deepwiki_mcp_agents.yml \
   --message "Use DeepWiki to explain the main modules in langchain-ai/langchain."
 ```
 
-The current sample model uses Anthropic via LangChain, so install the optional
-provider dependency (for example `langchain-anthropic`) and configure the
-required provider credentials before running. This DeepWiki call is a manual
-integration smoke test, not a unit test or CI requirement; automated tests stay
-offline and deterministic.
+The current sample model uses Anthropic via LangChain. To run it through Amazon
+Bedrock instead, set a Bedrock model in YAML and configure AWS normally:
+
+```yaml
+model:
+  provider: bedrock
+  name: anthropic.claude-3-5-haiku-20241022-v1:0
+  region: us-east-1
+  temperature: 0.0
+```
+
+```bash
+export AWS_REGION=us-east-1
+export AWS_PROFILE=my-profile
+```
+
+Environment credentials such as `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+and `AWS_SESSION_TOKEN` also work through the standard AWS credential chain.
+This DeepWiki call is a manual integration smoke test, not a unit test or CI
+requirement; automated tests stay offline and deterministic.

@@ -31,6 +31,8 @@ from agent_engine.parsers.parser import Parser
 from agent_engine.runtime.hooks.models import HOOK_POINTS
 
 _SECRET_MARKERS = ("api_key", "apikey", "secret", "token", "password", "private_key")
+_SECRET_KEY_EXEMPTIONS = {"max_tokens"}
+_SUPPORTED_MODEL_PROVIDERS = ("anthropic", "bedrock")
 
 
 def _validate_plugins(plugins: Any, errors: list[ValidationError]) -> None:
@@ -180,9 +182,7 @@ def _validate_execution(raw: Any, errors: list[ValidationError]) -> None:
     if "allow_duplicate_tool_calls" in raw and not isinstance(
         raw["allow_duplicate_tool_calls"], bool
     ):
-        errors.append(
-            ValidationError("execution.allow_duplicate_tool_calls", "Must be a boolean")
-        )
+        errors.append(ValidationError("execution.allow_duplicate_tool_calls", "Must be a boolean"))
 
 
 def _validate_hook_entry(point: str, index: int, entry: Any, errors: list[ValidationError]) -> None:
@@ -309,6 +309,56 @@ def _validate_mcps(mcps: dict[str, Any], errors: list[ValidationError]) -> None:
         _validate_mcp_tool_tags(mcp_id, raw, errors)
 
 
+def _validate_model(path: str, raw: Any, errors: list[ValidationError]) -> None:
+    if raw is None:
+        return
+    if not isinstance(raw, dict):
+        errors.append(ValidationError(path, "Must be a mapping"))
+        return
+
+    provider = raw.get("provider")
+    if not isinstance(provider, str) or not provider.strip():
+        errors.append(ValidationError(f"{path}.provider", "Required non-empty string"))
+    elif provider not in _SUPPORTED_MODEL_PROVIDERS:
+        errors.append(
+            ValidationError(
+                f"{path}.provider",
+                f"Unsupported provider '{provider}'. Supported providers: "
+                f"{', '.join(_SUPPORTED_MODEL_PROVIDERS)}",
+            )
+        )
+
+    name = raw.get("name")
+    if not isinstance(name, str) or not name.strip():
+        errors.append(ValidationError(f"{path}.name", "Required non-empty string"))
+
+    max_tokens = raw.get("max_tokens")
+    if max_tokens is not None and (
+        not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens <= 0
+    ):
+        errors.append(ValidationError(f"{path}.max_tokens", "Must be a positive integer"))
+
+    top_p = raw.get("top_p")
+    if top_p is not None and (
+        not isinstance(top_p, int | float) or isinstance(top_p, bool) or top_p < 0 or top_p > 1
+    ):
+        errors.append(ValidationError(f"{path}.top_p", "Must be between 0 and 1"))
+
+
+def _validate_models(
+    defaults: Any,
+    orchestrators: dict[str, Any],
+    agents: dict[str, Any],
+    errors: list[ValidationError],
+) -> None:
+    if isinstance(defaults, dict) and "model" in defaults:
+        _validate_model("defaults.model", defaults.get("model"), errors)
+    for node_type, nodes in (("orchestrators", orchestrators), ("agents", agents)):
+        for node_id, raw in nodes.items():
+            if isinstance(raw, dict) and "model" in raw:
+                _validate_model(f"{node_type}.{node_id}.model", raw.get("model"), errors)
+
+
 def _load(path: str) -> dict[str, Any]:
     source = Path(path)
     if not source.is_file():
@@ -358,6 +408,7 @@ class YAMLParser(Parser):
         mcps: dict[str, Any] = data.get("mcps", {}) or {}
 
         self._validate_graph(data["graph"], declared_ids, errors)
+        _validate_models(data.get("defaults"), orchestrators, agents, errors)
         _validate_node_refs(orchestrators, agents, resolvers, tools, mcps, errors)
         _validate_mcps(mcps, errors)
         _validate_hooks(data.get("hooks"), errors)
@@ -406,7 +457,7 @@ class YAMLParser(Parser):
         if isinstance(data, dict):
             for key, value in data.items():
                 child = f"{path}.{key}"
-                if _looks_secret(str(key)):
+                if str(key) not in _SECRET_KEY_EXEMPTIONS and _looks_secret(str(key)):
                     errors.append(
                         ValidationError(child, "Hardcoded secret-like key is not allowed")
                     )
@@ -521,6 +572,9 @@ class YAMLParser(Parser):
             provider=raw.get("provider", ""),
             name=raw.get("name", ""),
             temperature=raw.get("temperature"),
+            region=raw.get("region"),
+            max_tokens=raw.get("max_tokens"),
+            top_p=raw.get("top_p"),
         )
 
     def _build_resolvers(

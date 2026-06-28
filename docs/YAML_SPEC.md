@@ -279,6 +279,31 @@ plugin contract including generation modes and overwrite protection.
 `model`, but a node-level model is a **full replacement**, not a field-level
 merge. If a node overrides the model, it must provide all required model fields.
 
+Anthropic:
+
+```yaml
+model:
+  provider: anthropic
+  name: claude-haiku-4-5
+  temperature: 0.0
+```
+
+Amazon Bedrock for Anthropic Claude models:
+
+```yaml
+model:
+  provider: bedrock
+  name: anthropic.claude-3-5-haiku-20241022-v1:0
+  region: us-east-1
+  temperature: 0.0
+```
+
+For Bedrock, `region` may be omitted from YAML when `AWS_REGION` or
+`AWS_DEFAULT_REGION` is set. AWS credentials are resolved by the normal AWS
+credential chain, such as `AWS_PROFILE`, `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`, `~/.aws/credentials`, SSO, or an
+IAM role. Secrets must never be stored in YAML.
+
 ---
 
 ## Graph Topology
