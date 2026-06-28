@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agent-chat auto-mount demo</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: system-ui, sans-serif;
+        background: #f8fafc;
+        color: #111827;
+        padding: 32px;
+      }
+
+      main {
+        max-width: 720px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 28px;
+      }
+
+      p {
+        margin: 0 0 16px;
+        color: #4b5563;
+      }
+    </style>
+    <script>
+      window.agentChatConfig = {
+        title: "Auto-mounted Assistant",
+        color: "#16a34a",
+        greeting: "Hi from auto-mount"
+      };
+    </script>
+  </head>
+  <body>
+    <main>
+      <h1>Script-only auto-mount</h1>
+      <p>This page has no authored &lt;agent-chat&gt;. The widget creates one from window.agentChatConfig.</p>
+    </main>
+
+    <script type="module" src="/widget.js"></script>
+  </body>
+</html>

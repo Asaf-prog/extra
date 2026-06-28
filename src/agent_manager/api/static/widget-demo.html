@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agent-chat floating demo</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: system-ui, sans-serif;
+        background: #f8fafc;
+        color: #111827;
+        padding: 32px;
+      }
+
+      main {
+        max-width: 720px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 28px;
+      }
+
+      p {
+        margin: 0 0 16px;
+        color: #4b5563;
+      }
+
+      pre {
+        overflow-x: auto;
+        background: #111827;
+        color: #e5e7eb;
+        padding: 16px;
+        border-radius: 8px;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Floating widget</h1>
+      <p>This page embeds the widget with attributes and loads the compiled browser module.</p>
+      <pre>&lt;script type="module" src="/widget.js"&gt;&lt;/script&gt;
+&lt;agent-chat
+  title="Support"
+  color="#2563eb"
+  greeting="Hi! How can I help?"
+  mode="floating"
+  position="bottom-right"&gt;
+&lt;/agent-chat&gt;</pre>
+    </main>
+
+    <agent-chat
+      title="Support"
+      color="#2563eb"
+      greeting="Hi! How can I help?"
+      mode="floating"
+      position="bottom-right">
+    </agent-chat>
+    <script type="module" src="/widget.js"></script>
+  </body>
+</html>

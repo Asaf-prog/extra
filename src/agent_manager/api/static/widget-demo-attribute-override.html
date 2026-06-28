@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agent-chat attribute override demo</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: system-ui, sans-serif;
+        background: #f8fafc;
+        color: #111827;
+        padding: 32px;
+      }
+
+      main {
+        max-width: 720px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 28px;
+      }
+
+      p {
+        margin: 0 0 16px;
+        color: #4b5563;
+      }
+    </style>
+    <script>
+      window.agentChatConfig = {
+        title: "Global Config Assistant",
+        color: "#16a34a",
+        greeting: "This global greeting should not auto-mount on this page."
+      };
+    </script>
+  </head>
+  <body>
+    <main>
+      <h1>Attribute override</h1>
+      <p>An authored element is already present, so auto-mount is skipped and attributes control this widget.</p>
+    </main>
+
+    <agent-chat
+      title="Attribute Assistant"
+      color="#dc2626"
+      greeting="The attribute greeting wins."
+      mode="floating"
+      position="bottom-left">
+    </agent-chat>
+    <script type="module" src="/widget.js"></script>
+  </body>
+</html>

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agent-chat inline demo</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: system-ui, sans-serif;
+        background: #f8fafc;
+        color: #111827;
+        padding: 32px;
+      }
+
+      main {
+        max-width: 720px;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 28px;
+      }
+
+      p {
+        margin: 0 0 16px;
+        color: #4b5563;
+      }
+
+      .inline-shell {
+        max-width: 420px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Inline widget</h1>
+      <p>The inline widget renders directly in page flow and does not need a launcher click.</p>
+      <div class="inline-shell">
+        <agent-chat
+          title="Inline Assistant"
+          color="#7c3aed"
+          greeting="Inline help is ready."
+          mode="inline">
+        </agent-chat>
+      </div>
+    </main>
+
+    <script type="module" src="/widget.js"></script>
+  </body>
+</html>

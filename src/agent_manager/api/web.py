@@ -32,3 +32,21 @@ def mount_web(app: FastAPI, settings: Settings) -> None:
     @app.get("/demo")
     def demo() -> FileResponse:
         return FileResponse(STATIC_DIR / "demo.html", media_type="text/html")
+
+    @app.get("/widget-demo.html")
+    def widget_demo() -> FileResponse:
+        return FileResponse(STATIC_DIR / "widget-demo.html", media_type="text/html")
+
+    @app.get("/widget-demo-inline.html")
+    def widget_demo_inline() -> FileResponse:
+        return FileResponse(STATIC_DIR / "widget-demo-inline.html", media_type="text/html")
+
+    @app.get("/widget-demo-automount.html")
+    def widget_demo_automount() -> FileResponse:
+        return FileResponse(STATIC_DIR / "widget-demo-automount.html", media_type="text/html")
+
+    @app.get("/widget-demo-attribute-override.html")
+    def widget_demo_attribute_override() -> FileResponse:
+        return FileResponse(
+            STATIC_DIR / "widget-demo-attribute-override.html", media_type="text/html"
+        )

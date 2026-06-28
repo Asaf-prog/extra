@@ -59,6 +59,15 @@ export function styles(config: AgentChatConfig): string {
     .send:hover { opacity: .88; }
     .send:disabled { opacity: .4; cursor: default; }
     .send svg { width: 16px; height: 16px; }
+    @media (prefers-reduced-motion: reduce) {
+      .launcher,
+      .close,
+      .send,
+      .panel {
+        transition: none;
+      }
+      .launcher:hover { transform: none; }
+    }
     @media (max-width: 480px) {
       .panel:not(.inline) { width: 100vw; height: 100dvh; max-height: 100dvh;
         bottom: 0; ${side}: 0; border-radius: 0; }

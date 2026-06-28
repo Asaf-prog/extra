@@ -18,6 +18,8 @@ const SEND_ICON =
 
 type MessageEntry = { role: "user" | "ai"; text: string; typing?: boolean };
 
+let nextWidgetId = 0;
+
 export class AgentChatElement extends HTMLElement {
   static get observedAttributes(): string[] {
     return ["endpoint", "title", "color", "greeting", "position", "avatar", "mode"];
@@ -29,7 +31,12 @@ export class AgentChatElement extends HTMLElement {
   private cleanupCallbacks: Array<() => void> = [];
   private connected = false;
   private loaded = false;
+  private open = false;
   private entries: MessageEntry[] = [];
+  private readonly widgetId = `agent-chat-${++nextWidgetId}`;
+  private readonly panelId = `${this.widgetId}-panel`;
+  private readonly titleId = `${this.widgetId}-title`;
+  private launcher: HTMLButtonElement | null = null;
   private panel: HTMLElement | null = null;
   private messages: HTMLElement | null = null;
   private input: HTMLTextAreaElement | null = null;
@@ -57,14 +64,12 @@ export class AgentChatElement extends HTMLElement {
   attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
     if (!this.connected || oldValue === newValue) return;
     const previousEndpoint = this.config?.endpoint;
-    const wasOpen = this.panel?.classList.contains("open") ?? false;
     this.configure();
     if (previousEndpoint && previousEndpoint !== this.config.endpoint) {
       this.entries = [];
       this.loaded = false;
     }
     this.render();
-    if (wasOpen && this.config.mode === "floating") this.panel?.classList.add("open");
     if (this.config.mode === "inline" && !this.loaded) void this.loadHistory();
   }
 
@@ -88,13 +93,32 @@ export class AgentChatElement extends HTMLElement {
       const launcher = document.createElement("button");
       launcher.className = "launcher";
       launcher.setAttribute("aria-label", "Open chat");
+      launcher.setAttribute("aria-controls", this.panelId);
+      launcher.setAttribute("aria-expanded", String(this.open));
       launcher.innerHTML = CHAT_ICON;
       root.appendChild(launcher);
+      this.launcher = launcher;
       this.listen(launcher, "click", () => void this.toggle());
+      this.listen(launcher, "keydown", (event) => {
+        const keyboard = event as KeyboardEvent;
+        if (keyboard.key === "Enter" || keyboard.key === " ") {
+          keyboard.preventDefault();
+          void this.openChat();
+        }
+      });
+    } else {
+      this.launcher = null;
     }
 
     const panel = document.createElement("div");
-    panel.className = `panel${inline ? " inline" : ""}`;
+    panel.id = this.panelId;
+    panel.className = `panel${inline ? " inline" : ""}${this.open && !inline ? " open" : ""}`;
+    panel.setAttribute("aria-labelledby", this.titleId);
+    if (inline) {
+      panel.setAttribute("role", "region");
+    } else {
+      panel.setAttribute("role", "dialog");
+    }
     root.appendChild(panel);
     this.panel = panel;
 
@@ -110,6 +134,7 @@ export class AgentChatElement extends HTMLElement {
     header.appendChild(dot);
 
     const title = document.createElement("span");
+    title.id = this.titleId;
     title.className = "title";
     title.textContent = this.config.title;
     header.appendChild(title);
@@ -120,7 +145,7 @@ export class AgentChatElement extends HTMLElement {
       close.setAttribute("aria-label", "Close chat");
       close.innerHTML = CLOSE_ICON;
       header.appendChild(close);
-      this.listen(close, "click", () => this.panel?.classList.remove("open"));
+      this.listen(close, "click", () => this.closeChat({ restoreFocus: true }));
     }
 
     const body = document.createElement("div");
@@ -129,6 +154,8 @@ export class AgentChatElement extends HTMLElement {
 
     const messages = document.createElement("div");
     messages.className = "messages";
+    messages.setAttribute("aria-live", "polite");
+    messages.setAttribute("aria-relevant", "additions text");
     body.appendChild(messages);
     this.messages = messages;
 
@@ -138,6 +165,7 @@ export class AgentChatElement extends HTMLElement {
 
     const input = document.createElement("textarea");
     input.className = "input";
+    input.setAttribute("aria-label", "Message");
     input.placeholder = "Message…";
     input.rows = 1;
     composer.appendChild(input);
@@ -145,13 +173,22 @@ export class AgentChatElement extends HTMLElement {
 
     const send = document.createElement("button");
     send.className = "send";
-    send.setAttribute("aria-label", "Send");
+    send.setAttribute("aria-label", "Send message");
     send.innerHTML = SEND_ICON;
     composer.appendChild(send);
     this.sendButton = send;
 
     for (const type of ["keydown", "keyup", "keypress"]) {
-      this.listen(root, type, (event) => event.stopPropagation());
+      this.listen(root, type, (event) => {
+        if (type === "keydown") {
+          const keyboard = event as KeyboardEvent;
+          if (keyboard.key === "Escape" && !inline && this.open) {
+            keyboard.preventDefault();
+            this.closeChat({ restoreFocus: true });
+          }
+        }
+        event.stopPropagation();
+      });
     }
     this.listen(input, "input", () => {
       input.style.height = "auto";
@@ -181,10 +218,32 @@ export class AgentChatElement extends HTMLElement {
   }
 
   private async toggle(): Promise<void> {
-    if (!this.panel) return;
-    const opening = !this.panel.classList.contains("open");
-    this.panel.classList.toggle("open", opening);
-    if (opening && !this.loaded) await this.loadHistory();
+    if (this.open) {
+      this.closeChat({ restoreFocus: true });
+      return;
+    }
+    await this.openChat();
+  }
+
+  private async openChat(): Promise<void> {
+    if (this.config.mode === "inline") return;
+    this.open = true;
+    this.panel?.classList.add("open");
+    this.launcher?.setAttribute("aria-expanded", "true");
+    if (!this.loaded) await this.loadHistory();
+    this.focusComposer();
+  }
+
+  private closeChat({ restoreFocus }: { restoreFocus: boolean }): void {
+    if (this.config.mode === "inline") return;
+    this.open = false;
+    this.panel?.classList.remove("open");
+    this.launcher?.setAttribute("aria-expanded", "false");
+    if (restoreFocus) this.launcher?.focus?.({ preventScroll: true });
+  }
+
+  private focusComposer(): void {
+    this.input?.focus?.({ preventScroll: true });
   }
 
   private async conversationId(): Promise<string> {
@@ -224,6 +283,8 @@ export class AgentChatElement extends HTMLElement {
     element.className = `msg ${entry.role === "user" ? "user" : "ai"}`;
     if (entry.typing) {
       element.classList.add("typing");
+      element.setAttribute("role", "status");
+      element.setAttribute("aria-label", "Assistant is typing");
       element.textContent = "···";
     } else {
       element.innerHTML = entry.role === "user" ? escapeHtml(entry.text) : formatAssistantText(entry.text);
@@ -237,12 +298,14 @@ export class AgentChatElement extends HTMLElement {
     if (on) {
       this.entries.push({ role: "ai", text: "", typing: true });
       this.render();
+      if (this.open) this.focusComposer();
       return;
     }
     const index = this.entries.findIndex((entry) => entry.typing);
     if (index >= 0) {
       this.entries.splice(index, 1);
       this.render();
+      if (this.open) this.focusComposer();
     }
   }
 
@@ -265,6 +328,7 @@ export class AgentChatElement extends HTMLElement {
       this.addMessage("ai", "Something went wrong. Please try again.");
     } finally {
       if (this.sendButton) this.sendButton.disabled = false;
+      this.focusComposer();
     }
   }
 }
