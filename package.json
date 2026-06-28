@@ -1,0 +1,13 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck:widget": "tsc -p tsconfig.widget.json --noEmit",
+    "build:widget": "esbuild src/agent_manager/api/static/widget/index.ts --bundle --format=esm --target=es2020 --outfile=src/agent_manager/api/static/widget.js",
+    "test:widget": "node src/agent_manager/api/static/widget.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}
