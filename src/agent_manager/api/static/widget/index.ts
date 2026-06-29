@@ -8,6 +8,7 @@ export { escapeHtml, formatAssistantText } from "./security/renderMessage";
 export {
   conversationStorageKey,
   getStoredConversationId,
+  removeStoredConversationId,
   setStoredConversationId,
 } from "./storage/conversationStorage";
 

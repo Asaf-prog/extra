@@ -52099,6 +52099,13 @@ function applyConfigAttributes(element7, config) {
 var import_client = __toESM(require_client(), 1);
 
 // src/agent_manager/api/static/widget/api/AgentChatClient.ts
+var AgentChatHttpError = class extends Error {
+  constructor(status) {
+    super(`HTTP ${status}`);
+    this.status = status;
+    this.name = "AgentChatHttpError";
+  }
+};
 var AgentChatClient = class {
   constructor(endpoint) {
     this.endpoint = endpoint;
@@ -52106,7 +52113,7 @@ var AgentChatClient = class {
   async createConversation() {
     const response = await fetch(`${this.endpoint}/conversations`, { method: "POST" });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new AgentChatHttpError(response.status);
     }
     const data = await response.json();
     return String(data.conversation_id);
@@ -52114,7 +52121,7 @@ var AgentChatClient = class {
   async getMessages(conversationId) {
     const response = await fetch(`${this.endpoint}/conversations/${conversationId}/messages`);
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new AgentChatHttpError(response.status);
     }
     return await response.json();
   }
@@ -52125,7 +52132,7 @@ var AgentChatClient = class {
       body: JSON.stringify({ message })
     });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new AgentChatHttpError(response.status);
     }
     const data = await response.json();
     return {
@@ -52148,6 +52155,9 @@ function getStoredConversationId(endpoint, storage = localStorage) {
 }
 function setStoredConversationId(endpoint, conversationId, storage = localStorage) {
   storage.setItem(conversationStorageKey(endpoint), conversationId);
+}
+function removeStoredConversationId(endpoint, storage = localStorage) {
+  storage.removeItem(conversationStorageKey(endpoint));
 }
 
 // node_modules/lucide-react/dist/esm/createLucideIcon.mjs
@@ -52895,7 +52905,10 @@ function AgentChatApp({ client, config, onAnswer, panelId, titleId }) {
           text: message.content
         }))
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof AgentChatHttpError && error.status === 404) {
+        removeStoredConversationId(config.endpoint);
+      }
     }
   }, [client, config.endpoint, config.greeting, loaded]);
   (0, import_react9.useEffect)(() => {
@@ -52924,13 +52937,27 @@ function AgentChatApp({ client, config, onAnswer, panelId, titleId }) {
     }
     return id;
   }, [client, config.endpoint]);
+  const sendToAgent = (0, import_react9.useCallback)(
+    async (text10) => {
+      const id = await conversationId();
+      try {
+        return await client.sendMessage(id, text10);
+      } catch (error) {
+        if (!(error instanceof AgentChatHttpError) || error.status !== 404) throw error;
+        removeStoredConversationId(config.endpoint);
+        const freshId = await client.createConversation();
+        setStoredConversationId(config.endpoint, freshId);
+        return await client.sendMessage(freshId, text10);
+      }
+    },
+    [client, config.endpoint, conversationId]
+  );
   const submit = (0, import_react9.useCallback)(
     async (text10) => {
       setEntries((prev) => [...prev, { role: "user", text: text10 }, { role: "ai", text: "", typing: true }]);
       setSending(true);
       try {
-        const id = await conversationId();
-        const data = await client.sendMessage(id, text10);
+        const data = await sendToAgent(text10);
         setEntries((prev) => [
           ...prev.filter((entry) => !entry.typing),
           { role: "ai", text: data.answer, route: data.visited, tools: data.used_tools }
@@ -52945,7 +52972,7 @@ function AgentChatApp({ client, config, onAnswer, panelId, titleId }) {
         setSending(false);
       }
     },
-    [client, conversationId, onAnswer]
+    [onAnswer, sendToAgent]
   );
   return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
     "div",
@@ -53321,6 +53348,7 @@ export {
   formatAssistantText,
   getStoredConversationId,
   parseConfig,
+  removeStoredConversationId,
   setStoredConversationId
 };
 /*! Bundled license information:

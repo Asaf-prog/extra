@@ -13,3 +13,7 @@ export function setStoredConversationId(
 ): void {
   storage.setItem(conversationStorageKey(endpoint), conversationId);
 }
+
+export function removeStoredConversationId(endpoint: string, storage: Storage = localStorage): void {
+  storage.removeItem(conversationStorageKey(endpoint));
+}

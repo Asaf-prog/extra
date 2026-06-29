@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { AgentChatClient } from "../api/AgentChatClient";
+import { AgentChatHttpError, type AgentChatClient } from "../api/AgentChatClient";
 import {
   conversationStorageKey,
   getStoredConversationId,
+  removeStoredConversationId,
   setStoredConversationId,
 } from "../storage/conversationStorage";
 import type { AgentChatAnswerDetail, AgentChatConfig, ToolRecord } from "../types";
@@ -65,8 +66,11 @@ export function AgentChatApp({ client, config, onAnswer, panelId, titleId }: Age
           text: message.content,
         })),
       );
-    } catch {
-      // Offline on load is non-fatal.
+    } catch (error) {
+      if (error instanceof AgentChatHttpError && error.status === 404) {
+        removeStoredConversationId(config.endpoint);
+      }
+      // Offline/stale history on load is non-fatal.
     }
   }, [client, config.endpoint, config.greeting, loaded]);
 
@@ -101,13 +105,28 @@ export function AgentChatApp({ client, config, onAnswer, panelId, titleId }: Age
     return id;
   }, [client, config.endpoint]);
 
+  const sendToAgent = useCallback(
+    async (text: string) => {
+      const id = await conversationId();
+      try {
+        return await client.sendMessage(id, text);
+      } catch (error) {
+        if (!(error instanceof AgentChatHttpError) || error.status !== 404) throw error;
+        removeStoredConversationId(config.endpoint);
+        const freshId = await client.createConversation();
+        setStoredConversationId(config.endpoint, freshId);
+        return await client.sendMessage(freshId, text);
+      }
+    },
+    [client, config.endpoint, conversationId],
+  );
+
   const submit = useCallback(
     async (text: string) => {
       setEntries((prev) => [...prev, { role: "user", text }, { role: "ai", text: "", typing: true }]);
       setSending(true);
       try {
-        const id = await conversationId();
-        const data = await client.sendMessage(id, text);
+        const data = await sendToAgent(text);
         setEntries((prev) => [
           ...prev.filter((entry) => !entry.typing),
           { role: "ai", text: data.answer, route: data.visited, tools: data.used_tools },
@@ -122,7 +141,7 @@ export function AgentChatApp({ client, config, onAnswer, panelId, titleId }: Age
         setSending(false);
       }
     },
-    [client, conversationId, onAnswer],
+    [onAnswer, sendToAgent],
   );
 
   return (

@@ -1,12 +1,19 @@
 import type { ChatMessage, SendMessageResponse } from "../types";
 
+export class AgentChatHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`);
+    this.name = "AgentChatHttpError";
+  }
+}
+
 export class AgentChatClient {
   constructor(private readonly endpoint: string) {}
 
   async createConversation(): Promise<string> {
     const response = await fetch(`${this.endpoint}/conversations`, { method: "POST" });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new AgentChatHttpError(response.status);
     }
     const data = await response.json();
     return String(data.conversation_id);
@@ -15,7 +22,7 @@ export class AgentChatClient {
   async getMessages(conversationId: string): Promise<ChatMessage[]> {
     const response = await fetch(`${this.endpoint}/conversations/${conversationId}/messages`);
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new AgentChatHttpError(response.status);
     }
     return (await response.json()) as ChatMessage[];
   }
@@ -27,7 +34,7 @@ export class AgentChatClient {
       body: JSON.stringify({ message }),
     });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new AgentChatHttpError(response.status);
     }
     const data = await response.json();
     return {

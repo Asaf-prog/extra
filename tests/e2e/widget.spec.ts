@@ -56,6 +56,60 @@ async function mockConversationApi(page: Page, options: { failSend?: boolean } =
   return calls;
 }
 
+async function mockConversationApiWithStaleConversation(page: Page) {
+  const calls: string[] = [];
+  let created = false;
+
+  await page.route("**/conversations", async (route) => {
+    calls.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`);
+    created = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ conversation_id: "conv-fresh", session_id: "conv-fresh" }),
+    });
+  });
+
+  await page.route("**/conversations/*/messages", async (route: Route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const conversationId = url.pathname.split("/")[2] || "";
+    calls.push(`${request.method()} ${url.pathname}`);
+
+    if (conversationId === "conv-stale") {
+      await route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "conversation not found" }),
+      });
+      return;
+    }
+
+    if (conversationId !== "conv-fresh" || !created) {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "unexpected conversation" }),
+      });
+      return;
+    }
+
+    if (request.method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+      return;
+    }
+
+    const body = JSON.parse(request.postData() || "{}") as { message?: string };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ answer: `Recovered: ${body.message || ""}`, visited: [], used_tools: [] }),
+    });
+  });
+
+  return calls;
+}
+
 async function widget(page: Page, index = 0) {
   const handle = await page.locator("agent-chat").nth(index).elementHandle();
   if (!handle) throw new Error("agent-chat element not found");
@@ -311,6 +365,24 @@ test("backend error renders a user-friendly message", async ({ page }) => {
   await shadowClick(page, ".send");
 
   await expect.poll(() => shadowText(page, ".messages")).toContain("Something went wrong. Please try again.");
+});
+
+test("stale stored conversation is replaced before sending to the agent", async ({ page }) => {
+  const calls = await mockConversationApiWithStaleConversation(page);
+  await page.goto("/widget-demo.html");
+  await page.evaluate(() => localStorage.setItem("agent-chat:http://127.0.0.1:8123", "conv-stale"));
+
+  await shadowClick(page, ".launcher");
+  await shadowFill(page, ".input", "recover please");
+  await shadowClick(page, ".send");
+
+  await expect.poll(() => shadowText(page, ".messages")).toContain("Recovered: recover please");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("agent-chat:http://127.0.0.1:8123")))
+    .toBe("conv-fresh");
+  expect(calls).toContain("GET /conversations/conv-stale/messages");
+  expect(calls).toContain("POST /conversations");
+  expect(calls).toContain("POST /conversations/conv-fresh/messages");
 });
 
 test("script-only auto-mount creates one configured widget", async ({ page }) => {
