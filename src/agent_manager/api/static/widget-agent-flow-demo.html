@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agent-chat — real agent/sub-agent flow demo</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: system-ui, sans-serif;
+        background: #f8fafc;
+        color: #111827;
+        padding: 32px;
+      }
+      main {
+        max-width: 760px;
+      }
+      h1 {
+        margin: 0 0 6px;
+        font-size: 26px;
+      }
+      h2 {
+        margin: 28px 0 8px;
+        font-size: 18px;
+      }
+      p {
+        margin: 0 0 12px;
+        color: #4b5563;
+      }
+      code {
+        background: #e5e7eb;
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      pre {
+        overflow-x: auto;
+        background: #111827;
+        color: #e5e7eb;
+        padding: 16px;
+        border-radius: 8px;
+        line-height: 1.5;
+      }
+      ul {
+        color: #4b5563;
+        line-height: 1.7;
+      }
+      /* Routing evidence panel — populated from the real backend response. */
+      #debug {
+        margin-top: 24px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        background: #fff;
+        padding: 16px;
+      }
+      #debug h2 {
+        margin-top: 0;
+      }
+      #debug .empty {
+        color: #9ca3af;
+      }
+      .pathline {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin: 6px 0;
+      }
+      .hop {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #e5e7eb;
+        margin: 2px;
+      }
+      .hop.subagent {
+        background: #dbeafe;
+        color: #1d4ed8;
+        font-weight: 600;
+      }
+      .arrow {
+        color: #9ca3af;
+        margin: 0 2px;
+      }
+      .tool {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Widget → real agent → sub-agent flow</h1>
+      <p>
+        This page loads the <strong>real</strong> widget against the
+        <strong>real</strong> conversation API. Nothing on this page is mocked.
+        A question you type travels:
+      </p>
+      <p class="pathline">
+        widget &rarr; <code>/conversations</code> &rarr; agent engine &rarr;
+        <code>concierge_router</code> &rarr; a sub-agent &rarr; answer.
+      </p>
+
+      <h2>1. Run the backend with the demo config</h2>
+      <pre>agent-manager --config examples/widget_sub_agent_demo.yml --env .env --port 8100</pre>
+      <p>
+        Then open
+        <code>http://127.0.0.1:8100/widget-agent-flow-demo.html</code>.
+      </p>
+
+      <h2>2. Open the widget (bottom-right) and try</h2>
+      <ul>
+        <li>&ldquo;show me the available document tags&rdquo; &rarr; routes to <code>tags_agent</code></li>
+        <li>&ldquo;what are your support hours?&rdquo; &rarr; routes to <code>hours_agent</code></li>
+      </ul>
+
+      <h2>3. What proves the sub-agent ran</h2>
+      <p>
+        The backend returns the routing path in the response. The panel below is
+        filled live from the <code>agent-chat:answer</code> event the widget
+        emits after each reply. A hop like
+        <code>concierge_router/tags_agent</code> means the root orchestrator
+        routed to that sub-agent. The same path is logged to the browser console
+        and printed in the server logs (<code>run ended … visited=…</code>).
+      </p>
+
+      <div id="debug">
+        <h2>Routing evidence (live)</h2>
+        <div id="debug-body"><span class="empty">Send a message to see the agent path…</span></div>
+      </div>
+    </main>
+
+    <agent-chat
+      title="Agent Flow Demo"
+      color="#2563eb"
+      greeting="Ask me something that should route to a sub-agent."
+      mode="floating"
+      position="bottom-right">
+    </agent-chat>
+    <script type="module" src="/widget.js"></script>
+
+    <script>
+      // Listen for the safe routing metadata the widget emits. The event
+      // bubbles across the shadow boundary (composed: true), so document sees it.
+      const body = document.getElementById("debug-body");
+      document.addEventListener("agent-chat:answer", (event) => {
+        const { visited = [], used_tools = [] } = event.detail || {};
+        if (!visited.length) {
+          body.innerHTML = '<span class="empty">No routing metadata in the last response.</span>';
+          return;
+        }
+        const hops = visited
+          .map((node) => {
+            const isSub = node.includes("/");
+            const label = isSub ? node.split("/").slice(-1)[0] : node;
+            return `<span class="hop ${isSub ? "subagent" : ""}">${label}</span>`;
+          })
+          .join('<span class="arrow">&rarr;</span>');
+        const tools = used_tools.length
+          ? `<p class="tool">tools used: ${used_tools.map((t) => t.name).join(", ")}</p>`
+          : '<p class="tool">tools used: none</p>';
+        const subAgent = visited.find((n) => n.includes("/"));
+        const verdict = subAgent
+          ? `<p>✅ Sub-agent <code>${subAgent.split("/").slice(-1)[0]}</code> handled this turn.</p>`
+          : "<p>⚠️ No sub-agent hop in this turn.</p>";
+        body.innerHTML = `<div class="pathline">${hops}</div>${verdict}${tools}`;
+      });
+    </script>
+  </body>
+</html>
