@@ -140,13 +140,17 @@ class ConversationService:
         )
 
         final: RunStreamEvent | None = None
-        async for event in self._engine.stream(
-            build_prompt(prior_context.messages, text, self._window),
-            context=RunContext(run_id=run_id, conversation_id=conversation_id, user_id=user_id),
-        ):
-            if event.type == "final":
-                final = event
-            yield event
+        try:
+            async for event in self._engine.stream(
+                build_prompt(prior_context.messages, text, self._window),
+                context=RunContext(run_id=run_id, conversation_id=conversation_id, user_id=user_id),
+            ):
+                if event.type == "final":
+                    final = event
+                yield event
+        except Exception:
+            if final is None:
+                raise
 
         if final is not None:
             await self._repository.append_message(

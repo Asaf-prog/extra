@@ -134,3 +134,19 @@ document.addEventListener("agent-chat:answer", (e) => {
   console.log(e.detail.visited, e.detail.used_tools);
 });
 ```
+
+## Streaming
+
+The widget prefers the streaming endpoint:
+
+```text
+POST /conversations/{id}/messages/stream
+```
+
+Assistant text is rendered as `answer_delta` events arrive. The final event
+settles the answer and emits `agent-chat:answer` with the safe route/tool
+metadata. If streaming is unavailable or fails before a usable answer, the
+widget falls back to the regular non-streaming send endpoint.
+
+See [WIDGET_ARCHITECTURE.md](WIDGET_ARCHITECTURE.md) for the implementation
+details and next-step plan.

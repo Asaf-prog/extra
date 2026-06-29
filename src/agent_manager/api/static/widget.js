@@ -52141,7 +52141,48 @@ var AgentChatClient = class {
       used_tools: Array.isArray(data.used_tools) ? data.used_tools : void 0
     };
   }
+  async *streamMessage(conversationId, message) {
+    const response = await fetch(`${this.endpoint}/conversations/${conversationId}/messages/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message })
+    });
+    if (!response.ok) {
+      throw new AgentChatHttpError(response.status);
+    }
+    if (!response.body) {
+      throw new Error("Streaming response has no body");
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split(/\n\n/);
+        buffer = frames.pop() ?? "";
+        for (const frame of frames) {
+          const event2 = parseSseFrame(frame);
+          if (event2) yield event2;
+        }
+      }
+      buffer += decoder.decode();
+      const event = parseSseFrame(buffer);
+      if (event) yield event;
+    } finally {
+      reader.releaseLock();
+    }
+  }
 };
+function parseSseFrame(frame) {
+  const dataLines = frame.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice("data:".length).trimStart());
+  if (!dataLines.length) return null;
+  const data = dataLines.join("\n");
+  if (!data || data === "[DONE]") return null;
+  return JSON.parse(data);
+}
 
 // src/agent_manager/api/static/widget/react/AgentChatApp.tsx
 var import_react9 = __toESM(require_react(), 1);
@@ -52881,6 +52922,11 @@ function statusLabel(state) {
 
 // src/agent_manager/api/static/widget/react/AgentChatApp.tsx
 var import_jsx_runtime4 = __toESM(require_jsx_runtime(), 1);
+var nextMessageCounter = 0;
+function nextMessageId(role) {
+  nextMessageCounter += 1;
+  return `${role}-${Date.now()}-${nextMessageCounter}`;
+}
 function AgentChatApp({ client, config, onAnswer, panelId, titleId }) {
   const inline = config.mode === "inline";
   const [open, setOpen] = (0, import_react9.useState)(inline);
@@ -52894,13 +52940,14 @@ function AgentChatApp({ client, config, onAnswer, panelId, titleId }) {
     setLoaded(true);
     const existing = localStorage.getItem(conversationStorageKey(config.endpoint));
     if (!existing) {
-      if (config.greeting) setEntries((prev) => [...prev, { role: "ai", text: config.greeting }]);
+      if (config.greeting) setEntries((prev) => [...prev, { id: nextMessageId("ai"), role: "ai", text: config.greeting }]);
       return;
     }
     try {
       const history = await client.getMessages(existing);
       setEntries(
         history.map((message) => ({
+          id: nextMessageId(message.role === "user" ? "user" : "ai"),
           role: message.role === "user" ? "user" : "ai",
           text: message.content
         }))
@@ -52952,27 +52999,63 @@ function AgentChatApp({ client, config, onAnswer, panelId, titleId }) {
     },
     [client, config.endpoint, conversationId]
   );
+  const streamFromAgent = (0, import_react9.useCallback)(
+    async function* (text10) {
+      const id = await conversationId();
+      try {
+        yield* client.streamMessage(id, text10);
+      } catch (error) {
+        if (!(error instanceof AgentChatHttpError) || error.status !== 404) throw error;
+        removeStoredConversationId(config.endpoint);
+        const freshId = await client.createConversation();
+        setStoredConversationId(config.endpoint, freshId);
+        yield* client.streamMessage(freshId, text10);
+      }
+    },
+    [client, config.endpoint, conversationId]
+  );
+  const patchEntry = (0, import_react9.useCallback)((id, update) => {
+    setEntries((prev) => prev.map((entry) => entry.id === id ? update(entry) : entry));
+  }, []);
   const submit = (0, import_react9.useCallback)(
     async (text10) => {
-      setEntries((prev) => [...prev, { role: "user", text: text10 }, { role: "ai", text: "", typing: true }]);
+      const assistantId = nextMessageId("ai");
+      setEntries((prev) => [
+        ...prev,
+        { id: nextMessageId("user"), role: "user", text: text10 },
+        { id: assistantId, role: "ai", text: "", typing: true }
+      ]);
       setSending(true);
       try {
-        const data = await sendToAgent(text10);
-        setEntries((prev) => [
-          ...prev.filter((entry) => !entry.typing),
-          { role: "ai", text: data.answer, route: data.visited, tools: data.used_tools }
-        ]);
-        onAnswer({ visited: data.visited ?? [], used_tools: data.used_tools ?? [] });
-      } catch {
-        setEntries((prev) => [
-          ...prev.filter((entry) => !entry.typing),
-          { role: "ai", text: "Something went wrong. Please try again." }
-        ]);
+        let finalDetail = { visited: [], used_tools: [] };
+        for await (const event of streamFromAgent(text10)) {
+          finalDetail = applyStreamEvent(assistantId, event, patchEntry, finalDetail);
+        }
+        patchEntry(assistantId, (entry) => ({ ...entry, typing: false }));
+        onAnswer(finalDetail);
+      } catch (error) {
+        try {
+          const data = await sendToAgent(text10);
+          patchEntry(assistantId, () => ({
+            id: assistantId,
+            role: "ai",
+            text: data.answer,
+            route: data.visited,
+            tools: data.used_tools
+          }));
+          onAnswer({ visited: data.visited ?? [], used_tools: data.used_tools ?? [] });
+        } catch {
+          patchEntry(assistantId, () => ({
+            id: assistantId,
+            role: "ai",
+            text: error instanceof Error && error.message ? `Something went wrong. Please try again.` : "Something went wrong. Please try again."
+          }));
+        }
       } finally {
         setSending(false);
       }
     },
-    [onAnswer, sendToAgent]
+    [onAnswer, patchEntry, sendToAgent, streamFromAgent]
   );
   return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
     "div",
@@ -53037,7 +53120,7 @@ function AgentChatApp({ client, config, onAnswer, panelId, titleId }) {
                       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(MessageContent, { children: entry.role === "ai" ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(MessageResponse, { children: entry.text }) : entry.text })
                     ] })
                   },
-                  `${entry.role}-${index2}-${entry.text}`
+                  entry.id
                 )) }) }),
                 /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(PromptInput, { onSubmit: (message) => void submit(message.text), children: [
                   /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
@@ -53064,6 +53147,62 @@ function AgentChatApp({ client, config, onAnswer, panelId, titleId }) {
       ]
     }
   );
+}
+function applyStreamEvent(assistantId, event, patchEntry, currentDetail) {
+  if (event.type === "answer_delta") {
+    patchEntry(assistantId, (entry) => ({
+      ...entry,
+      text: entry.text + (event.content ?? ""),
+      typing: false
+    }));
+    return currentDetail;
+  }
+  if (event.type === "route") {
+    const route = event.route ?? currentDetail.visited;
+    patchEntry(assistantId, (entry) => ({ ...entry, route, typing: false }));
+    return { ...currentDetail, visited: route };
+  }
+  if (event.type === "tool_started" || event.type === "tool_succeeded" || event.type === "tool_failed") {
+    const tool = streamToolRecord(event);
+    patchEntry(assistantId, (entry) => ({
+      ...entry,
+      tools: upsertTool(entry.tools ?? [], tool),
+      typing: false
+    }));
+    return { ...currentDetail, used_tools: upsertTool(currentDetail.used_tools, tool) };
+  }
+  if (event.type === "final") {
+    const visited = event.route ?? currentDetail.visited;
+    const usedTools = event.used_tools ?? currentDetail.used_tools;
+    patchEntry(assistantId, (entry) => ({
+      ...entry,
+      text: event.content ?? entry.text,
+      route: visited,
+      tools: usedTools,
+      typing: false
+    }));
+    return { visited, used_tools: usedTools };
+  }
+  if (event.type === "error") {
+    throw new Error(event.error || "stream failed");
+  }
+  return currentDetail;
+}
+function streamToolRecord(event) {
+  return {
+    name: event.tool_name ?? "tool",
+    provider: event.provider ?? "runtime",
+    status: event.type === "tool_started" ? "started" : event.type === "tool_succeeded" ? "succeeded" : "failed",
+    server_id: event.server_id,
+    error: event.error
+  };
+}
+function upsertTool(tools, next2) {
+  const index2 = tools.findIndex((tool) => tool.name === next2.name && tool.provider === next2.provider);
+  if (index2 === -1) return [...tools, next2];
+  const copy = tools.slice();
+  copy[index2] = { ...copy[index2], ...next2 };
+  return copy;
 }
 function ToolMessage({ route, tools = [] }) {
   if (!route?.length && tools.length === 0) return null;

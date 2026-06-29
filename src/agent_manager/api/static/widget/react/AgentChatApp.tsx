@@ -7,7 +7,7 @@ import {
   removeStoredConversationId,
   setStoredConversationId,
 } from "../storage/conversationStorage";
-import type { AgentChatAnswerDetail, AgentChatConfig, ToolRecord } from "../types";
+import type { AgentChatAnswerDetail, AgentChatConfig, StreamEvent, ToolRecord } from "../types";
 import {
   Conversation,
   ConversationContent,
@@ -26,12 +26,20 @@ import {
 } from "./shadcnAiElements";
 
 type MessageEntry = {
+  id: string;
   role: "user" | "ai";
   text: string;
   typing?: boolean;
   route?: string[];
   tools?: ToolRecord[];
 };
+
+let nextMessageCounter = 0;
+
+function nextMessageId(role: MessageEntry["role"]): string {
+  nextMessageCounter += 1;
+  return `${role}-${Date.now()}-${nextMessageCounter}`;
+}
 
 export interface AgentChatAppProps {
   client: AgentChatClient;
@@ -55,13 +63,14 @@ export function AgentChatApp({ client, config, onAnswer, panelId, titleId }: Age
     setLoaded(true);
     const existing = localStorage.getItem(conversationStorageKey(config.endpoint));
     if (!existing) {
-      if (config.greeting) setEntries((prev) => [...prev, { role: "ai", text: config.greeting }]);
+      if (config.greeting) setEntries((prev) => [...prev, { id: nextMessageId("ai"), role: "ai", text: config.greeting }]);
       return;
     }
     try {
       const history = await client.getMessages(existing);
       setEntries(
         history.map((message) => ({
+          id: nextMessageId(message.role === "user" ? "user" : "ai"),
           role: message.role === "user" ? "user" : "ai",
           text: message.content,
         })),
@@ -121,27 +130,68 @@ export function AgentChatApp({ client, config, onAnswer, panelId, titleId }: Age
     [client, config.endpoint, conversationId],
   );
 
+  const streamFromAgent = useCallback(
+    async function* (text: string): AsyncGenerator<StreamEvent> {
+      const id = await conversationId();
+      try {
+        yield* client.streamMessage(id, text);
+      } catch (error) {
+        if (!(error instanceof AgentChatHttpError) || error.status !== 404) throw error;
+        removeStoredConversationId(config.endpoint);
+        const freshId = await client.createConversation();
+        setStoredConversationId(config.endpoint, freshId);
+        yield* client.streamMessage(freshId, text);
+      }
+    },
+    [client, config.endpoint, conversationId],
+  );
+
+  const patchEntry = useCallback((id: string, update: (entry: MessageEntry) => MessageEntry) => {
+    setEntries((prev) => prev.map((entry) => (entry.id === id ? update(entry) : entry)));
+  }, []);
+
   const submit = useCallback(
     async (text: string) => {
-      setEntries((prev) => [...prev, { role: "user", text }, { role: "ai", text: "", typing: true }]);
+      const assistantId = nextMessageId("ai");
+      setEntries((prev) => [
+        ...prev,
+        { id: nextMessageId("user"), role: "user", text },
+        { id: assistantId, role: "ai", text: "", typing: true },
+      ]);
       setSending(true);
       try {
-        const data = await sendToAgent(text);
-        setEntries((prev) => [
-          ...prev.filter((entry) => !entry.typing),
-          { role: "ai", text: data.answer, route: data.visited, tools: data.used_tools },
-        ]);
-        onAnswer({ visited: data.visited ?? [], used_tools: data.used_tools ?? [] });
-      } catch {
-        setEntries((prev) => [
-          ...prev.filter((entry) => !entry.typing),
-          { role: "ai", text: "Something went wrong. Please try again." },
-        ]);
+        let finalDetail: AgentChatAnswerDetail = { visited: [], used_tools: [] };
+        for await (const event of streamFromAgent(text)) {
+          finalDetail = applyStreamEvent(assistantId, event, patchEntry, finalDetail);
+        }
+        patchEntry(assistantId, (entry) => ({ ...entry, typing: false }));
+        onAnswer(finalDetail);
+      } catch (error) {
+        try {
+          const data = await sendToAgent(text);
+          patchEntry(assistantId, () => ({
+            id: assistantId,
+            role: "ai",
+            text: data.answer,
+            route: data.visited,
+            tools: data.used_tools,
+          }));
+          onAnswer({ visited: data.visited ?? [], used_tools: data.used_tools ?? [] });
+        } catch {
+          patchEntry(assistantId, () => ({
+            id: assistantId,
+            role: "ai",
+            text:
+              error instanceof Error && error.message
+                ? `Something went wrong. Please try again.`
+                : "Something went wrong. Please try again.",
+          }));
+        }
       } finally {
         setSending(false);
       }
     },
-    [onAnswer, sendToAgent],
+    [onAnswer, patchEntry, sendToAgent, streamFromAgent],
   );
 
   return (
@@ -203,7 +253,7 @@ export function AgentChatApp({ client, config, onAnswer, panelId, titleId }: Age
             <ConversationContent>
               {entries.map((entry, index) => (
                 <Message
-                  key={`${entry.role}-${index}-${entry.text}`}
+                  key={entry.id}
                   from={entry.role === "user" ? "user" : "assistant"}
                   typing={entry.typing}
                 >
@@ -240,6 +290,75 @@ export function AgentChatApp({ client, config, onAnswer, panelId, titleId }: Age
       </section>
     </div>
   );
+}
+
+function applyStreamEvent(
+  assistantId: string,
+  event: StreamEvent,
+  patchEntry: (id: string, update: (entry: MessageEntry) => MessageEntry) => void,
+  currentDetail: AgentChatAnswerDetail,
+): AgentChatAnswerDetail {
+  if (event.type === "answer_delta") {
+    patchEntry(assistantId, (entry) => ({
+      ...entry,
+      text: entry.text + (event.content ?? ""),
+      typing: false,
+    }));
+    return currentDetail;
+  }
+  if (event.type === "route") {
+    const route = event.route ?? currentDetail.visited;
+    patchEntry(assistantId, (entry) => ({ ...entry, route, typing: false }));
+    return { ...currentDetail, visited: route };
+  }
+  if (event.type === "tool_started" || event.type === "tool_succeeded" || event.type === "tool_failed") {
+    const tool = streamToolRecord(event);
+    patchEntry(assistantId, (entry) => ({
+      ...entry,
+      tools: upsertTool(entry.tools ?? [], tool),
+      typing: false,
+    }));
+    return { ...currentDetail, used_tools: upsertTool(currentDetail.used_tools, tool) };
+  }
+  if (event.type === "final") {
+    const visited = event.route ?? currentDetail.visited;
+    const usedTools = event.used_tools ?? currentDetail.used_tools;
+    patchEntry(assistantId, (entry) => ({
+      ...entry,
+      text: event.content ?? entry.text,
+      route: visited,
+      tools: usedTools,
+      typing: false,
+    }));
+    return { visited, used_tools: usedTools };
+  }
+  if (event.type === "error") {
+    throw new Error(event.error || "stream failed");
+  }
+  return currentDetail;
+}
+
+function streamToolRecord(event: StreamEvent): ToolRecord {
+  return {
+    name: event.tool_name ?? "tool",
+    provider: event.provider ?? "runtime",
+    status:
+      event.type === "tool_started"
+        ? "started"
+        : event.type === "tool_succeeded"
+          ? "succeeded"
+          : "failed",
+    server_id: event.server_id,
+    error: event.error,
+  };
+}
+
+function upsertTool(tools: ToolRecord[], next: ToolRecord): ToolRecord[] {
+  const index = tools.findIndex((tool) => tool.name === next.name && tool.provider === next.provider);
+  if (index === -1) return [...tools, next];
+  const copy = tools.slice();
+  copy[index] = { ...copy[index], ...next };
+  return copy;
 }
 
 function ToolMessage({ route, tools = [] }: { route?: string[]; tools?: ToolRecord[] }) {

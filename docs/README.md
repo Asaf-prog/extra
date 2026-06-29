@@ -19,8 +19,9 @@ implementation.
 6. [MCP_AND_TOOLS.md](MCP_AND_TOOLS.md) — tools, MCP servers, and permissions.
 7. [RUNTIME_HOOKS.md](RUNTIME_HOOKS.md) — trusted lifecycle hooks (auth, policy, audit).
 8. [WIDGET.md](WIDGET.md) — embeddable browser chat widget usage.
-9. [DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md) — how to work in this repo.
-10. [ROADMAP.md](ROADMAP.md) — phased plan.
+9. [WIDGET_ARCHITECTURE.md](WIDGET_ARCHITECTURE.md) — React-in-widget architecture and streaming plan.
+10. [DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md) — how to work in this repo.
+11. [ROADMAP.md](ROADMAP.md) — phased plan.
 
 ## Architecture Decision Records
 

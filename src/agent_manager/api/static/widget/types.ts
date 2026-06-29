@@ -45,6 +45,26 @@ export interface SendMessageResponse {
   used_tools?: ToolRecord[];
 }
 
+export interface StreamEvent {
+  type:
+    | "route"
+    | "answer_delta"
+    | "tool_started"
+    | "tool_succeeded"
+    | "tool_failed"
+    | "final"
+    | "error";
+  content?: string;
+  route?: string[];
+  tool_name?: string;
+  provider?: string;
+  server_id?: string;
+  status?: string;
+  error?: string;
+  system_name?: string;
+  used_tools?: ToolRecord[];
+}
+
 /** Detail of the `agent-chat:answer` event a host page can listen for. */
 export interface AgentChatAnswerDetail {
   visited: string[];

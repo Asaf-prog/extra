@@ -47,3 +47,16 @@ class SendMessageResponse(BaseModel):
     answer: str
     visited: list[str]
     used_tools: list[ToolRecord]
+
+
+class StreamEventOut(BaseModel):
+    type: str
+    content: str | None = None
+    route: list[str] | None = None
+    tool_name: str | None = None
+    provider: str | None = None
+    server_id: str | None = None
+    status: str | None = None
+    error: str | None = None
+    system_name: str | None = None
+    used_tools: list[ToolRecord] | None = None

@@ -68,6 +68,20 @@ class _SubAgentEngine(Engine):
         yield RunStreamEvent(type="final", content="unused")
 
 
+class _FinalThenCleanupErrorEngine(Engine):
+    async def build(self, _spec: object) -> None: ...
+
+    async def run(self, message: str, *, context: RunContext | None = None) -> RunResult:
+        return RunResult(system_name="stub", visited=["agent"], answer=message)
+
+    async def stream(
+        self, message: str, *, context: RunContext | None = None
+    ) -> AsyncIterator[RunStreamEvent]:
+        yield RunStreamEvent(type="answer_delta", content="done")
+        yield RunStreamEvent(type="final", content="done", route=("agent",))
+        raise RuntimeError("cleanup after final")
+
+
 def test_send_surfaces_sub_agent_in_visited_without_mocking() -> None:
     """End-to-end through the real routes + service: the response exposes the
     sub-agent routing path (the evidence the demo page renders)."""
@@ -82,6 +96,45 @@ def test_send_surfaces_sub_agent_in_visited_without_mocking() -> None:
     assert body["visited"] == ["concierge_router", "concierge_router/tags_agent"]
     assert any("/" in hop for hop in body["visited"]), "expected a sub-agent hop"
     assert "finance" in body["answer"]
+
+
+def test_stream_surfaces_sse_events_and_persists_final_answer(client: TestClient) -> None:
+    cid = client.post("/conversations").json()["conversation_id"]
+
+    with client.stream(
+        "POST", f"/conversations/{cid}/messages/stream", json={"message": "hello"}
+    ) as response:
+        text = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+    assert 'event: answer_delta\ndata: {"type": "answer_delta", "content": "x"}' in text
+    assert "event: done\ndata: [DONE]" in text
+
+    messages = client.get(f"/conversations/{cid}/messages").json()
+    assert [(m["role"], m["content"]) for m in messages] == [("user", "hello")]
+
+
+def test_stream_ignores_cleanup_error_after_final() -> None:
+    app = FastAPI()
+    app.state.service = ConversationService(_FinalThenCleanupErrorEngine(), MemoryRepository())
+    app.include_router(router)
+    client = TestClient(app)
+    cid = client.post("/conversations").json()["conversation_id"]
+
+    with client.stream(
+        "POST", f"/conversations/{cid}/messages/stream", json={"message": "x"}
+    ) as response:
+        text = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert 'event: final\ndata: {"type": "final", "content": "done", "route": ["agent"]}' in text
+    assert "cleanup after final" not in text
+    messages = client.get(f"/conversations/{cid}/messages").json()
+    assert [(m["role"], m["content"]) for m in messages] == [
+        ("user", "x"),
+        ("assistant", "done"),
+    ]
 
 
 def test_create_accepts_stable_session_and_send_accepts_user(client: TestClient) -> None:

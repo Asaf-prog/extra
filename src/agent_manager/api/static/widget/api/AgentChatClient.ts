@@ -1,4 +1,4 @@
-import type { ChatMessage, SendMessageResponse } from "../types";
+import type { ChatMessage, SendMessageResponse, StreamEvent } from "../types";
 
 export class AgentChatHttpError extends Error {
   constructor(readonly status: number) {
@@ -43,4 +43,51 @@ export class AgentChatClient {
       used_tools: Array.isArray(data.used_tools) ? data.used_tools : undefined,
     };
   }
+
+  async *streamMessage(conversationId: string, message: string): AsyncGenerator<StreamEvent> {
+    const response = await fetch(`${this.endpoint}/conversations/${conversationId}/messages/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+    if (!response.ok) {
+      throw new AgentChatHttpError(response.status);
+    }
+    if (!response.body) {
+      throw new Error("Streaming response has no body");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split(/\n\n/);
+        buffer = frames.pop() ?? "";
+        for (const frame of frames) {
+          const event = parseSseFrame(frame);
+          if (event) yield event;
+        }
+      }
+      buffer += decoder.decode();
+      const event = parseSseFrame(buffer);
+      if (event) yield event;
+    } finally {
+      reader.releaseLock();
+    }
+  }
+}
+
+function parseSseFrame(frame: string): StreamEvent | null {
+  const dataLines = frame
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice("data:".length).trimStart());
+  if (!dataLines.length) return null;
+  const data = dataLines.join("\n");
+  if (!data || data === "[DONE]") return null;
+  return JSON.parse(data) as StreamEvent;
 }

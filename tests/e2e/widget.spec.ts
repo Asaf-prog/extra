@@ -14,6 +14,42 @@ async function mockConversationApi(page: Page, options: { failSend?: boolean } =
     });
   });
 
+  await page.route("**/conversations/*/messages/stream", async (route: Route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const conversationId = url.pathname.split("/")[2] || "conv-smoke";
+    calls.push(`${request.method()} ${url.pathname}`);
+
+    if (options.failSend) {
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "test failure" }),
+      });
+      return;
+    }
+
+    const body = JSON.parse(request.postData() || "{}") as { message?: string };
+    const now = new Date("2026-06-28T00:00:00.000Z").toISOString();
+    history[conversationId] = [
+      ...(history[conversationId] || []),
+      { role: "user", content: body.message || "", created_at: now },
+      { role: "assistant", content: `Echo: ${body.message || ""}`, created_at: now },
+    ];
+
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: [
+        `event: answer_delta\ndata: ${JSON.stringify({ type: "answer_delta", content: "Echo: " })}`,
+        `event: answer_delta\ndata: ${JSON.stringify({ type: "answer_delta", content: body.message || "" })}`,
+        `event: final\ndata: ${JSON.stringify({ type: "final", content: `Echo: ${body.message || ""}`, route: [], used_tools: [] })}`,
+        "event: done\ndata: [DONE]",
+        "",
+      ].join("\n\n"),
+    });
+  });
+
   await page.route("**/conversations/*/messages", async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -104,6 +140,34 @@ async function mockConversationApiWithStaleConversation(page: Page) {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ answer: `Recovered: ${body.message || ""}`, visited: [], used_tools: [] }),
+    });
+  });
+
+  await page.route("**/conversations/*/messages/stream", async (route: Route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const conversationId = url.pathname.split("/")[2] || "";
+    calls.push(`${request.method()} ${url.pathname}`);
+
+    if (conversationId === "conv-stale") {
+      await route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "conversation not found" }),
+      });
+      return;
+    }
+
+    const body = JSON.parse(request.postData() || "{}") as { message?: string };
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: [
+        `event: answer_delta\ndata: ${JSON.stringify({ type: "answer_delta", content: "Recovered: " })}`,
+        `event: final\ndata: ${JSON.stringify({ type: "final", content: `Recovered: ${body.message || ""}`, route: [], used_tools: [] })}`,
+        "event: done\ndata: [DONE]",
+        "",
+      ].join("\n\n"),
     });
   });
 
@@ -329,7 +393,7 @@ test("sending a message calls backend, renders assistant answer, stores conversa
     .poll(() => page.evaluate(() => localStorage.getItem("agent-chat:http://127.0.0.1:8123")))
     .toBe("conv-smoke");
   expect(calls).toContain("POST /conversations");
-  expect(calls).toContain("POST /conversations/conv-smoke/messages");
+  expect(calls).toContain("POST /conversations/conv-smoke/messages/stream");
 
   await page.reload();
   await shadowClick(page, ".launcher");
@@ -350,11 +414,12 @@ test("Shift+Enter inserts a newline and Enter sends", async ({ page }) => {
   await expect.poll(() => shadowValue(page, ".input")).toBe("first line\nsecond line");
   expect(calls).not.toContain("POST /conversations");
   expect(calls).not.toContain("POST /conversations/conv-smoke/messages");
+  expect(calls).not.toContain("POST /conversations/conv-smoke/messages/stream");
 
   await page.keyboard.press("Enter");
   await expect.poll(() => shadowText(page, ".messages")).toContain("Echo: first line\nsecond line");
   expect(calls).toContain("POST /conversations");
-  expect(calls).toContain("POST /conversations/conv-smoke/messages");
+  expect(calls).toContain("POST /conversations/conv-smoke/messages/stream");
 });
 
 test("backend error renders a user-friendly message", async ({ page }) => {
@@ -382,7 +447,7 @@ test("stale stored conversation is replaced before sending to the agent", async 
     .toBe("conv-fresh");
   expect(calls).toContain("GET /conversations/conv-stale/messages");
   expect(calls).toContain("POST /conversations");
-  expect(calls).toContain("POST /conversations/conv-fresh/messages");
+  expect(calls).toContain("POST /conversations/conv-fresh/messages/stream");
 });
 
 test("script-only auto-mount creates one configured widget", async ({ page }) => {
