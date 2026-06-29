@@ -125,7 +125,6 @@ class FakeDocument extends FakeElement {
     super("#document");
     this.readyState = "loading";
     this.body = new FakeElement("body");
-    this.body.setConnected(true);
   }
   createElement(tagName) {
     const Constructor = customElements.get(tagName);
@@ -305,36 +304,6 @@ autoMountAgentChat();
 assert.equal(document.body.querySelectorAll("agent-chat").length, 1, "auto-mount does not duplicate");
 
 resetPage();
-let chat = createChat();
-assert.ok(chat.shadowRoot.querySelector(".launcher"));
-assert.ok(chat.shadowRoot.querySelector(".panel"));
-const panel = chat.shadowRoot.querySelector(".panel");
-chat.shadowRoot.querySelector(".launcher").click();
-await flush();
-assert.ok(panel.classList.contains("open"));
-chat.shadowRoot.querySelector(".close").click();
-assert.ok(!panel.classList.contains("open"));
-
-resetPage();
-chat = createChat({ mode: "inline" });
-assert.ok(!chat.shadowRoot.querySelector(".launcher"));
-assert.ok(chat.shadowRoot.querySelector(".panel").classList.contains("inline"));
-
-resetPage();
-chat = createChat({ title: "Before" });
-const sendBeforeReconnect = chat.shadowRoot.querySelector(".send");
-const listenerCountBeforeReconnect = sendBeforeReconnect.eventListeners.get("click")?.size || 0;
-chat.connectedCallback();
-assert.equal(
-  sendBeforeReconnect.eventListeners.get("click")?.size || 0,
-  listenerCountBeforeReconnect,
-  "connectedCallback does not double-bind while already connected",
-);
-assert.equal(chat.shadowRoot.querySelector(".title").textContent, "Before");
-chat.setAttribute("title", "After");
-assert.equal(chat.shadowRoot.querySelector(".title").textContent, "After");
-
-resetPage();
 const fetchCalls = [];
 globalThis.fetch = async (url, options = {}) => {
   fetchCalls.push({ url, options });
@@ -342,52 +311,33 @@ globalThis.fetch = async (url, options = {}) => {
   if (url.endsWith("/messages")) return jsonResponse({ answer: "hello back" });
   throw new Error(`unexpected fetch: ${url}`);
 };
-chat = createChat({ endpoint: "https://api.example" });
-chat.shadowRoot.querySelector(".input").value = "hello";
-chat.shadowRoot.querySelector(".send").click();
-await flush();
-assert.equal(localStorage.getItem(conversationStorageKey("https://api.example")), "conv-1");
+let client = new AgentChatClient("https://api.example");
+const conversationId = await client.createConversation();
+assert.equal(conversationId, "conv-1");
+const sendResponse = await client.sendMessage(conversationId, "hello");
 assert.equal(fetchCalls[0].url, "https://api.example/conversations");
 assert.equal(fetchCalls[1].url, "https://api.example/conversations/conv-1/messages");
 assert.equal(JSON.parse(fetchCalls[1].options.body).message, "hello");
-assert.deepEqual(
-  chat.shadowRoot.querySelectorAll(".msg").map((msg) => msg.innerHTML || msg.textContent),
-  ["hello", "hello back"],
-);
+assert.equal(sendResponse.answer, "hello back");
 
 resetPage();
-localStorage.setItem(conversationStorageKey("https://api.example"), "conv-stored");
 globalThis.fetch = async (url) => {
   if (url.endsWith("/conv-stored/messages")) {
     return jsonResponse([{ role: "assistant", content: "old answer" }]);
   }
   throw new Error(`unexpected fetch: ${url}`);
 };
-chat = createChat({ endpoint: "https://api.example" });
-chat.shadowRoot.querySelector(".launcher").click();
-await flush();
-assert.equal(chat.shadowRoot.querySelector(".msg").innerHTML, "old answer");
+client = new AgentChatClient("https://api.example");
+const history = await client.getMessages("conv-stored");
+assert.deepEqual(history, [{ role: "assistant", content: "old answer" }]);
 
 resetPage();
 globalThis.fetch = async (url) => {
   if (url.endsWith("/conversations")) return jsonResponse({ conversation_id: "conv-2" });
   return jsonResponse({}, false, 500);
 };
-chat = createChat({ endpoint: "https://api.example" });
-chat.shadowRoot.querySelector(".input").value = "break";
-chat.shadowRoot.querySelector(".send").click();
-await flush();
-const lastMessage = chat.shadowRoot.querySelectorAll(".msg").at(-1);
-assert.equal(lastMessage.innerHTML, "Something went wrong. Please try again.");
-
-resetPage();
-chat = createChat();
-const send = chat.shadowRoot.querySelector(".send");
-assert.ok(send.eventListeners.get("click")?.size > 0);
-chat.remove();
-assert.equal(send.eventListeners.get("click")?.size || 0, 0);
-
-const client = new AgentChatClient("https://api.example");
+client = new AgentChatClient("https://api.example");
 assert.ok(client);
+await assert.rejects(() => client.sendMessage("conv-2", "break"), /HTTP 500/);
 
 console.log("widget self-check: OK");

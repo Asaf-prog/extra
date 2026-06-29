@@ -5,6 +5,8 @@ export function styles(config: AgentChatConfig): string {
   return `
     :host { all: initial; }
     * { box-sizing: border-box; font-family: -apple-system, system-ui, sans-serif; }
+    .react-mount,
+    .agent-chat-react { display: contents; }
     .launcher {
       position: fixed; bottom: 20px; ${side}: 20px; width: 56px; height: 56px;
       border: 0; border-radius: 50%; background: ${config.color}; color: #fff; cursor: pointer;
@@ -43,9 +45,14 @@ export function styles(config: AgentChatConfig): string {
     .msg.ai.typing { color: #a1a1aa; letter-spacing: 1px; }
     .msg.user { background: #f4f4f5; color: #18181b; border-radius: 18px;
       padding: 10px 14px; margin-left: auto; max-width: 88%; }
+    .message-content { min-width: 0; }
     .msg code { background: #f4f4f5; border-radius: 4px; padding: 1px 5px; font-size: 13px; }
     .msg pre { background: #f4f4f5; border-radius: 10px; padding: 10px 12px; overflow-x: auto; margin: 0; }
     .msg pre code { background: none; padding: 0; white-space: pre-wrap; }
+    .agent-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; color: #71717a;
+      font-size: 12px; line-height: 1.3; }
+    .route { border: 1px solid #e4e4e7; border-radius: 999px; padding: 4px 8px;
+      background: #fafafa; }
     .composer { display: flex; align-items: flex-end; gap: 8px; padding: 12px 14px;
       border-top: 1px solid #f0f0f1; }
     .input { flex: 1; resize: none; max-height: 120px; border: 1px solid #e4e4e7;

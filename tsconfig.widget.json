@@ -3,10 +3,11 @@
     "target": "ES2020",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
     "strict": true,
     "lib": ["DOM", "DOM.Iterable", "ES2020"],
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src/agent_manager/api/static/widget/**/*.ts"]
+  "include": ["src/agent_manager/api/static/widget/**/*.ts", "src/agent_manager/api/static/widget/**/*.tsx"]
 }
