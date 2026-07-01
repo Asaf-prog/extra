@@ -141,6 +141,20 @@ async def test_retrieve_conversation_context_with_bounds(repo: Repository) -> No
     assert [m.content for m in context.messages] == ["message-3", "message-4"]
 
 
+async def test_get_token_usage_sums_across_messages(repo: Repository) -> None:
+    await repo.create_session("sess-1")
+    msg1 = _message("sess-1", Role.USER, "hi", run_id="r1")
+    msg2 = _message(
+        "sess-1", Role.ASSISTANT, "hello", run_id="r1", input_tokens=10, output_tokens=5
+    )
+    msg3 = _message("sess-1", Role.USER, "bye", run_id="r2")
+    msg4 = _message("sess-1", Role.ASSISTANT, "ok", run_id="r2", input_tokens=20, output_tokens=8)
+    for msg in (msg1, msg2, msg3, msg4):
+        await repo.append_message(msg)
+
+    assert await repo.get_token_usage("sess-1") == 43  # 10+5+20+8
+
+
 async def test_delete_expired_snapshots_and_rebuild(repo: Repository) -> None:
     await repo.create_session("sess-1")
     await repo.append_message(_message("sess-1", Role.USER, "hello"), snapshot_ttl_seconds=1)
@@ -231,6 +245,8 @@ def _message(
     *,
     run_id: str | None = None,
     user_id: str | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
 ) -> ConversationMessage:
     return ConversationMessage(
         message_id=uuid4().hex,
@@ -240,4 +256,6 @@ def _message(
         role=role,
         content=content,
         created_at=datetime.now(UTC),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
     )

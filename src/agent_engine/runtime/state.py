@@ -32,3 +32,6 @@ class GraphState(TypedDict, total=False):
 
     route_stream: Callable[[tuple[str, ...]], None]
     """Optional callback for the final route once the selected agent is known."""
+
+    token_stream: Callable[[int, int], None]
+    """Optional callback invoked after every LLM call with (input_tokens, output_tokens)."""

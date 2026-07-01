@@ -36,14 +36,21 @@ def load_file(base_dir: Path, rel_path: str | None) -> str:
 async def invoke_model(model: Any, messages: list[Any], state: GraphState) -> Any:
     answer_stream = state.get("answer_stream")
     if not callable(answer_stream):
-        return await model.ainvoke(messages)
-    streamed = None
-    async for chunk in model.astream(messages):
-        streamed = chunk if streamed is None else streamed + chunk
-        text = as_text(getattr(chunk, "content", ""))
-        if text:
-            answer_stream(text)
-    return streamed or AIMessage(content="")
+        response = await model.ainvoke(messages)
+    else:
+        streamed = None
+        async for chunk in model.astream(messages):
+            streamed = chunk if streamed is None else streamed + chunk
+            text = as_text(getattr(chunk, "content", ""))
+            if text:
+                answer_stream(text)
+        response = streamed or AIMessage(content="")
+    token_stream = state.get("token_stream")
+    if callable(token_stream):
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            token_stream(usage.get("input_tokens", 0), usage.get("output_tokens", 0))
+    return response
 
 
 async def run_tool_loop(

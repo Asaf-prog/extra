@@ -195,15 +195,18 @@ class SqlRepository(Repository):
                 session, session_id, snapshot_ttl_seconds=snapshot_ttl_seconds
             )
 
+    async def get_token_usage(self, conversation_id: str) -> int:
+        async with self._sessions() as session:
+            rows = await self._message_rows(session, conversation_id, None)
+        return sum((r.input_tokens or 0) + (r.output_tokens or 0) for r in rows)
+
     async def get_context(
         self,
         session_id: str,
         *,
         max_messages: int | None = None,
         max_chars: int | None = None,
-        max_tokens: int | None = None,
     ) -> ConversationContext:
-        del max_tokens
         snapshot = await self.get_snapshot(session_id)
         source = "snapshot"
         if snapshot is None:

@@ -21,7 +21,11 @@ from agent_manager.api.schemas import (
     StreamEventOut,
     ToolRecord,
 )
-from agent_manager.application import ConversationNotFound, ConversationService
+from agent_manager.application import (
+    ConversationNotFound,
+    ConversationService,
+    ConversationTokenBudgetExceeded,
+)
 
 router = APIRouter()
 
@@ -54,6 +58,8 @@ async def send_message(
         result = await service.send(conversation_id, body.message, user_id=body.user_id)
     except ConversationNotFound as exc:
         raise HTTPException(status_code=404, detail="conversation not found") from exc
+    except ConversationTokenBudgetExceeded:
+        raise HTTPException(status_code=429, detail="conversation token budget exceeded") from None
     except Exception as exc:  # engine failure
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return SendMessageResponse(
@@ -94,6 +100,8 @@ async def stream_message(
         first = None
     except ConversationNotFound as exc:
         raise HTTPException(status_code=404, detail="conversation not found") from exc
+    except ConversationTokenBudgetExceeded:
+        raise HTTPException(status_code=429, detail="conversation token budget exceeded") from None
 
     async def event_source() -> AsyncIterator[str]:
         try:

@@ -64,12 +64,15 @@ def _new_state(
     *,
     answer_stream: Callable[[str], None] | None = None,
     route_stream: Callable[[tuple[str, ...]], None] | None = None,
+    token_stream: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     state: dict[str, Any] = {"message": message, "used_tools": []}
     if answer_stream is not None:
         state["answer_stream"] = answer_stream
     if route_stream is not None:
         state["route_stream"] = route_stream
+    if token_stream is not None:
+        state["token_stream"] = token_stream
     return state
 
 
@@ -203,6 +206,14 @@ class LangGraphEngine(Engine):
         ctx = await self._begin_run(context)
         token = current_run_context.set(ctx)
         exec_token = current_execution.set(ExecutionLimiter(self._policy))
+        input_tokens = 0
+        output_tokens = 0
+
+        def accumulate_tokens(inp: int, out: int) -> None:
+            nonlocal input_tokens, output_tokens
+            input_tokens += inp
+            output_tokens += out
+
         config = RunnableConfig(
             run_name=self._system_name,
             callbacks=self._callbacks,
@@ -210,12 +221,16 @@ class LangGraphEngine(Engine):
         )
         log(logger, logging.INFO, "run started", run_id=ctx.run_id, system=self._system_name)
         try:
-            result = await app.ainvoke(cast(Any, _new_state(message)), config)
+            result = await app.ainvoke(
+                cast(Any, _new_state(message, token_stream=accumulate_tokens)), config
+            )
             run_result = RunResult(
                 system_name=self._system_name,
                 visited=result.get("visited", []),
                 answer=result.get("answer", ""),
                 used_tools=tuple(result.get("used_tools", [])),
+                input_tokens=input_tokens or None,
+                output_tokens=output_tokens or None,
             )
             await hook_manager.run_run_end(
                 ctx, _run_end_context(self._system_name, ctx, run_result)
@@ -252,12 +267,21 @@ class LangGraphEngine(Engine):
 
         ctx = await self._begin_run(context)
         queue: asyncio.Queue[RunStreamEvent | BaseException | None] = asyncio.Queue()
+        input_tokens = 0
+        output_tokens = 0
+
+        def accumulate_tokens(inp: int, out: int) -> None:
+            nonlocal input_tokens, output_tokens
+            input_tokens += inp
+            output_tokens += out
+
         state = _new_state(
             message,
             answer_stream=lambda c: queue.put_nowait(
                 RunStreamEvent(type="answer_delta", content=c)
             ),
             route_stream=lambda r: queue.put_nowait(RunStreamEvent(type="route", route=r)),
+            token_stream=accumulate_tokens,
         )
 
         async def run_graph() -> None:
@@ -277,6 +301,8 @@ class LangGraphEngine(Engine):
                         route=visited,
                         system_name=self._system_name,
                         used_tools=used_tools,
+                        input_tokens=input_tokens or None,
+                        output_tokens=output_tokens or None,
                     )
                 )
                 await hook_manager.run_run_end(

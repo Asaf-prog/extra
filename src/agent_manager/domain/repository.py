@@ -78,8 +78,11 @@ class Repository(ABC):
         *,
         max_messages: int | None = None,
         max_chars: int | None = None,
-        max_tokens: int | None = None,
     ) -> ConversationContext: ...
+
+    @abstractmethod
+    async def get_token_usage(self, conversation_id: str) -> int:
+        """Total input + output tokens consumed across all messages in the conversation."""
 
     @abstractmethod
     async def delete_expired_snapshots(self, now: datetime) -> int: ...

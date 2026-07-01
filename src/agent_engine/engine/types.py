@@ -14,3 +14,5 @@ class RunResult:
     visited: list[str]
     answer: str
     used_tools: tuple[ToolUsageRecord, ...] = field(default_factory=tuple)
+    input_tokens: int | None = None
+    output_tokens: int | None = None

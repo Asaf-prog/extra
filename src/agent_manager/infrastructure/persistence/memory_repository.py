@@ -159,15 +159,19 @@ class MemoryRepository(Repository):
         self._snapshots[session_id] = snapshot
         return snapshot
 
+    async def get_token_usage(self, conversation_id: str) -> int:
+        return sum(
+            (m.input_tokens or 0) + (m.output_tokens or 0)
+            for m in self._messages.get(conversation_id, [])
+        )
+
     async def get_context(
         self,
         session_id: str,
         *,
         max_messages: int | None = None,
         max_chars: int | None = None,
-        max_tokens: int | None = None,
     ) -> ConversationContext:
-        del max_tokens
         snapshot = self._snapshots.get(session_id)
         source = "snapshot"
         if snapshot is None:

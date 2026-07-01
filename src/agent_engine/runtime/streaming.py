@@ -29,3 +29,5 @@ class RunStreamEvent:
     error: str | None = None
     system_name: str | None = None
     used_tools: tuple[ToolUsageRecord, ...] = ()
+    input_tokens: int | None = None
+    output_tokens: int | None = None
