@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import importlib.util
-import sys
-import types
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from pathlib import Path
 
 import httpx
+
+from agent_engine.loaders._import import import_from_path, register_shared_module
 
 
 class _PluginAuth(httpx.Auth):
@@ -51,7 +50,7 @@ class MCPAuthLoader:
         if not path.is_file():
             return None
         self._ensure_shared()
-        module = _import_from_path(path)
+        module = import_from_path(path)
         fn = getattr(module, "get_headers", None)
         if fn is None or not callable(fn):
             return None
@@ -61,16 +60,4 @@ class MCPAuthLoader:
         if self._shared_loaded:
             return
         self._shared_loaded = True
-        shared_path = self._base_dir / "plugins" / "resolvers" / "shared.py"
-        if shared_path.is_file():
-            module = _import_from_path(shared_path)
-            sys.modules.setdefault("shared", module)
-
-
-def _import_from_path(path: Path) -> types.ModuleType:
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load module from {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+        register_shared_module(self._base_dir / "plugins" / "resolvers")

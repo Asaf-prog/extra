@@ -603,10 +603,15 @@ and `agentctl chat`.
 
 **API server (0009 — ✅ done, two layers):**
 `agent_engine/api/app.py` exposes a thin, stateless FastAPI app directly over
-the engine (`GET /health`, `POST /invoke`, `POST /stream`). `agent_manager/api/`
-exposes a conversation-lifecycle API on top of it
+the engine (`GET /health`, `POST /invoke`, `POST /stream`), started by
+**`agentctl serve`** (default port `8080`) — no persistence, no widget.
+`agent_manager/api/` exposes a conversation-lifecycle API on top of it
 (`POST /conversations`, `GET/POST .../messages`, `POST .../messages/stream` as
-SSE) backed by `agent_manager`'s persistence layer (see next).
+SSE) backed by `agent_manager`'s persistence layer (see next), started by the
+separate **`agent-manager`** console script (default port `8100`) — this is
+also what serves the embeddable chat widget. `agentctl chat` talks to neither
+server by default; in `--url` mode it talks to `agentctl serve`'s stateless
+`/invoke`/`/stream` API and does not persist anything.
 
 **Conversation persistence (✅ done, not in the original task list):**
 `agent_manager` is a DDD-style service (`domain/`, `application/`,

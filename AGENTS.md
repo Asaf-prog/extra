@@ -26,9 +26,13 @@ guardrails (see [docs/EXECUTION_LIMITS.md](docs/EXECUTION_LIMITS.md)), prompt
 rendering, and the CLI (`validate`, `inspect`, `generate`, `run`, `serve`,
 `chat`) are implemented. Model access supports both Anthropic and Amazon
 Bedrock. Two HTTP API layers exist: a thin `agent_engine` API (`/invoke`,
-`/stream`) over the stateless engine, and `agent_manager` — a conversation
-lifecycle service built on top of it with SQLite-backed persistence, SSE
-streaming, and an embeddable JS/React chat widget. Basic observability
+`/stream`), started by `agentctl serve` (default port `8080`) — stateless, no
+persistence, no widget — and `agent_manager` — a conversation lifecycle
+service built on top of it with SQLite-backed persistence, SSE streaming, and
+an embeddable JS/React chat widget, started by the separate `agent-manager`
+console script (default port `8100`). `agentctl chat` is a separate, ephemeral
+developer console that persists nothing (see `docs/ARCHITECTURE.md` §14 for
+detail). Basic observability
 (structured logging plus a Langfuse callback provider) is wired in. A
 `Dockerfile`/`entrypoint.sh` provide a basic container image.
 

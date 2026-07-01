@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import importlib.util
-import sys
-import types
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from agent_engine.loaders._import import import_from_path, register_shared_module
 
 
 class ResolverLoaderError(RuntimeError):
@@ -54,7 +53,7 @@ class ResolverLoader:
             raise ResolverLoaderError(
                 f"Resolver plugin not found: {path}\nRun `agentctl generate` to create the stub."
             )
-        module = _import_from_path(path)
+        module = import_from_path(path)
         cls = getattr(module, "Resolver", None)
         if cls is None or not isinstance(cls, type):
             raise ResolverLoaderError(f"{path} must define a class named 'Resolver'")
@@ -74,16 +73,4 @@ class ResolverLoader:
         if self._shared_loaded:
             return
         self._shared_loaded = True
-        shared_path = resolvers_dir / "shared.py"
-        if shared_path.is_file():
-            module = _import_from_path(shared_path)
-            sys.modules.setdefault("shared", module)
-
-
-def _import_from_path(path: Path) -> types.ModuleType:
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load module from {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+        register_shared_module(resolvers_dir)

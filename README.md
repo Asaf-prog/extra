@@ -149,9 +149,18 @@ The console script is **`agentctl`** (run `agentctl --help`). A global
 | `validate` | `agentctl validate <spec.yml>` | Offline pre-flight; exits non-zero on failure |
 | `inspect`  | `agentctl inspect <spec.yml>` | Offline summary of agents/MCPs/hooks/plugins/tags |
 | `generate` | `agentctl generate --config <spec.yml>` | Create resolver/tool/hook stubs + `plugins.toml` |
-| `run`      | `agentctl run --config <spec.yml> --message "..."` | Run one message (`--stream`, `--env`) |
-| `serve`    | `agentctl serve --config <spec.yml>` | HTTP API (`--host`, `--port`, `--env`) |
-| `chat`     | `agentctl chat --config <spec.yml>` | Interactive console; reuse one engine across questions (`--stream`, `--env`, `--url`) |
+| `run`      | `agentctl run --config <spec.yml> --message "..."` | Run one message (`--stream`, `--env`); persists to SQLite via `agent_manager` |
+| `serve`    | `agentctl serve --config <spec.yml>` | **Stateless** engine HTTP API — `/invoke`, `/stream`, no persistence, no widget (`--host`, `--port`, default port `8080`, `--env`) |
+| `chat`     | `agentctl chat --config <spec.yml>` | Ephemeral developer console; reuse one engine across questions, nothing is persisted (`--stream`, `--env`, `--url`) |
+
+`serve` and `chat` are developer/embedding tools, not the conversation product. For
+a persisted, multi-turn HTTP API with SSE streaming and the embeddable chat
+widget, run the separate **`agent-manager`** console script instead (default
+port `8100`; see [`docs/WIDGET.md`](docs/WIDGET.md)):
+
+```bash
+agent-manager --config examples/agents.yml --port 8100
+```
 
 `validate` and `inspect` are **fully offline** — no LLM calls, no MCP network,
 no tool execution:
@@ -172,8 +181,10 @@ network or LLM work. `inspect` never prints secrets: hook config is shown as
 
 `agentctl chat` is a developer simulation console: it keeps one engine (or one
 server connection) alive and lets you ask question after question without
-restarting the process. Type `exit`, `quit`, or `q` — or press Ctrl-C / Ctrl-D —
-to stop. Empty input is ignored, and a single failed question prints the error
+restarting the process. It is **ephemeral** — nothing is written to a
+database — unlike `agentctl run`, which persists each conversation turn via
+`agent_manager`. Type `exit`, `quit`, or `q` — or press Ctrl-C / Ctrl-D — to
+stop. Empty input is ignored, and a single failed question prints the error
 and keeps the loop running.
 
 ```bash
