@@ -91,13 +91,13 @@ Run two messages with the same stable session:
 
 ```bash
 agentctl run \
-  --config examples/full-test/agents.yaml \
+  --config examples/enterprise-knowledge-assistant/agents.yaml \
   --session-id demo-1 \
   --user-id asaf \
   --message "My name is Asaf. Remember this for the next message."
 
 agentctl run \
-  --config examples/full-test/agents.yaml \
+  --config examples/enterprise-knowledge-assistant/agents.yaml \
   --session-id demo-1 \
   --user-id asaf \
   --message "What is my name?"

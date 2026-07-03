@@ -1,4 +1,4 @@
-"""Runtime hook plugin for the AI Research Assistant example.
+"""Runtime hook plugin for the Enterprise Knowledge Assistant example.
 
 Demonstrates the framework's four most useful hook lifecycle points without ever
 writing secrets into YAML or leaking credentials into logs or the LLM:

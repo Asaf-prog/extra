@@ -1,5 +1,5 @@
 # ============================================================================
-# AI Research Assistant
+# Enterprise Knowledge Assistant
 #
 # Reference example for the declarative Agent Engine.
 #
@@ -33,10 +33,10 @@
 #      - synthesis
 #
 # Validate:
-#   agentctl validate examples/full-test/agents.yaml
+#   agentctl validate examples/enterprise-knowledge-assistant/agents.yaml
 #
 # Inspect:
-#   agentctl inspect examples/full-test/agents.yaml
+#   agentctl inspect examples/enterprise-knowledge-assistant/agents.yaml
 # ============================================================================
 
 # ---------------------------------------------------------------------------
@@ -44,7 +44,7 @@
 # ---------------------------------------------------------------------------
 
 system:
-  name: "AI Research Assistant"
+  name: "Enterprise Knowledge Assistant"
 
 # ---------------------------------------------------------------------------
 # Defaults
