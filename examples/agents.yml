@@ -5,7 +5,7 @@
 
 # ---- 1. META ----
 system:
-  name: "Rami Levy AI System"
+  name: "GlobalCorp AI System"
   # admin_agent is protected: true → engine expects plugins/access.py
   # with AccessResolver.can_access(ctx, node_id) -> bool at boot
 

@@ -88,7 +88,7 @@ Flat sections declare *what exists*; `graph` declares the runtime topology. See
 
 ```yaml
 system:
-  name: "Rami Levy AI System"
+  name: "GlobalCorp AI System"
 
 defaults:
   model:
