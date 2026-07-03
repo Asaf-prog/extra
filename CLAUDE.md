@@ -20,5 +20,5 @@ make check         # lint + typecheck + test — must pass before finishing a ta
 ## Guardrails
 
 - Do not skip tests or hardcode secrets.
-- Do not change architecture decisions without an ADR.
+- Do not change architecture decisions without explicit approval.
 - Do not edit `.claude/skills/`, `.claude/agents/`, or `.claude/workflows/` directly.

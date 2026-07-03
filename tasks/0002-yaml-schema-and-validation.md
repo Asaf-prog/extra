@@ -9,12 +9,11 @@ errors. **No compilation or runtime behavior.**
 ## Context
 
 The current YAML contract is demonstrated by
-[`examples/agents.yml`](../examples/agents.yml) and described by
+[`examples/enterprise-knowledge-assistant/agents.yaml`](../examples/enterprise-knowledge-assistant/agents.yaml) and described by
 [`examples/config.schema.json`](../examples/config.schema.json). YAML is
 declarative data: validate it before compiling or running anything.
 
-**Read first:** `AGENTS.md`, `.ai/skills/yaml-schema.md`, `docs/YAML_SPEC.md`,
-`docs/adr/0002-yaml-is-compiled-not-executed-directly.md`.
+**Read first:** `AGENTS.md`, `.ai/skills/yaml-schema.md`, `docs/YAML_SPEC.md`.
 
 ## Scope
 
@@ -58,7 +57,7 @@ declarative data: validate it before compiling or running anything.
 
 ## Acceptance criteria
 
-- [ ] `examples/agents.yml` loads and validates with no errors.
+- [ ] `examples/enterprise-knowledge-assistant/agents.yaml` loads and validates with no errors.
 - [ ] Invalid samples produce structured, located error messages.
 - [ ] Dangling graph/resolver/tool/MCP references are caught.
 - [ ] Missing/multiple roots and cycles are caught.

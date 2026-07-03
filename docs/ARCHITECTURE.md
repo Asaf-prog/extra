@@ -20,8 +20,8 @@ is that teams define *what* their agent system should be, and the platform owns
 
 > Read this with [`YAML_SPEC.md`](YAML_SPEC.md) (the input contract),
 > [`RUNTIME_LIFECYCLE.md`](RUNTIME_LIFECYCLE.md), [`PROMPT_RENDERING.md`](PROMPT_RENDERING.md),
-> [`SIDECAR_CONTEXT_AUTH.md`](SIDECAR_CONTEXT_AUTH.md), [`MCP_AND_TOOLS.md`](MCP_AND_TOOLS.md),
-> and the ADRs in [`adr/`](adr/).
+> [`SIDECAR_CONTEXT_AUTH.md`](SIDECAR_CONTEXT_AUTH.md), and
+> [`MCP_AND_TOOLS.md`](MCP_AND_TOOLS.md).
 
 ---
 
@@ -42,10 +42,10 @@ The intended developer experience is a small CLI (working name `agentctl`).
 Once the corresponding phases land, a user should be able to run:
 
 ```bash
-agentctl validate examples/agents.yml
-agentctl graph    examples/agents.yml
-agentctl run      examples/agents.yml --message "hello"
-agentctl serve    examples/agents.yml
+agentctl validate examples/enterprise-knowledge-assistant/agents.yaml
+agentctl graph    examples/enterprise-knowledge-assistant/agents.yaml
+agentctl run      examples/enterprise-knowledge-assistant/agents.yaml --message "hello"
+agentctl serve    examples/enterprise-knowledge-assistant/agents.yaml
 ```
 
 The long-term promise:
@@ -102,8 +102,7 @@ agents.yml (declarative input specification)
 ```
 
 Two distinct phases sit inside this flow: a **build/compilation phase** that runs
-once before serving, and a **runtime/execution phase** that runs per request
-(see [ADR 0007](adr/0007-build-phase-separate-from-runtime-phase.md)).
+once before serving, and a **runtime/execution phase** that runs per request.
 
 ---
 
@@ -136,8 +135,7 @@ Responsibilities:
   (`agentctl generate` — ✅ implemented with generation modes and overwrite
   protection), and *(later)* generate **deployment artifacts**.
 
-The runtime only ever sees the compiled, typed model — never raw YAML dicts
-(see [ADR 0002](adr/0002-yaml-is-compiled-not-executed-directly.md)).
+The runtime only ever sees the compiled, typed model — never raw YAML dicts.
 
 ---
 
@@ -170,8 +168,7 @@ Responsibilities:
 - **Execute the root node as a supervisor agent**: the orchestrator's children
   (agents or nested orchestrators) are exposed to it as callable tools; it
   decides which child tool(s) to call, collects their answers, and synthesises a
-  final response. The whole tree runs inside the root invocation
-  (see [ADR 0009](adr/0009-orchestrators-are-supervisor-agents.md)).
+  final response. The whole tree runs inside the root invocation.
 - **Resolve dynamic prompt values** by calling each node's declared resolvers.
 - **Render prompt templates** for this request (strict; missing variables fail).
 - **Execute leaf agents** with only their declared tools bound.
@@ -185,23 +182,22 @@ Responsibilities:
 
 ## 5. Client Extension Layer
 
-Client-specific logic **must not** be hardcoded into the generic runtime
-(see [ADR 0003](adr/0003-client-specific-logic-lives-in-sidecar.md)). It belongs
+Client-specific logic **must not** be hardcoded into the generic runtime. It belongs
 in client-owned extension points:
 
 - **Resolver plugins** — in-process Python methods that produce prompt values.
 - **Tool plugins** — in-process Python methods exposed to the LLM as actions.
 - **Access plugin** — a fixed `plugins/access.py` that decides protected-node
   access.
-- **Plugin packages** — the customer's own Python package holding shared state
+- **Plugin packages** — the client's own Python package holding shared state
   (DB pools, REST clients, auth clients, caches).
-- **Sidecar service** *(optional / future, ADR-gated)* — an out-of-process,
+- **Sidecar service** *(optional / future)* — an out-of-process,
   client-owned service for stronger isolation or non-Python logic.
 
 Examples of what lives in the extension layer (never in the runtime):
 
 - authentication and authorization
-- `customer_code` / tenant / user lookups
+- `organization_id` / tenant / user lookups
 - permission and role lookups
 - database queries and third-party API calls
 - business-specific context
@@ -215,8 +211,7 @@ not to contain the business logic itself.
 
 ## 6. RuntimeEngine vs. ExecutionContext
 
-This separation is mandatory (see
-[ADR 0001](adr/0001-runtime-engine-created-once.md)).
+This separation is mandatory.
 
 > **RuntimeEngine = how the system works. ExecutionContext = what is happening in
 > this specific request.**
@@ -248,7 +243,7 @@ Owns everything specific to a single request:
 - `ctx` built from headers/request data
 - identity / tenant / user / session (as interpreted by plugins)
 - roles / permissions (as interpreted by plugins)
-- `customer_code` and other resolved context values
+- `organization_id` and other resolved context values
 - the selected agent node path
 - rendered prompt values for this request
 - temporary tool results
@@ -262,15 +257,14 @@ Request-scoped data never leaks onto the `RuntimeEngine` or the compiled graph.
 ## 7. Node Declarations vs. Agent Nodes
 
 A node (orchestrator or agent) is **declared once** under `orchestrators:` /
-`agents:` and may be **reused** at multiple locations in the `graph`
-(see [ADR 0006](adr/0006-reusable-agent-definitions-and-hierarchy-instances.md)).
+`agents:` and may be **reused** at multiple locations in the `graph`.
 
 - The **NodeDeclaration** is the reusable declaration (its prompts, model,
   tools, resolvers, etc.).
 - An **AgentNode** is one concrete node inside the compiled graph.
 
 A single `security_review_agent` definition may, for example, appear under both
-an invoice flow and a payment flow. Conceptually:
+a documentation flow and an analysis flow. Conceptually:
 
 ```text
 agents:
@@ -281,17 +275,17 @@ agents:
 
 graph:
   root_orchestrator:
-    invoice_orchestrator:
-      security_review_agent:    # AgentNode A (under invoices)
-    payment_orchestrator:
-      security_review_agent:    # AgentNode B (under payments)
+    knowledge_router:
+      security_review_agent:    # AgentNode A (under knowledge_router)
+    analysis_router:
+      security_review_agent:    # AgentNode B (under analysis_router)
 ```
 
 Here:
 
 - `security_review_agent` is the reusable **NodeDeclaration**.
-- The occurrence under `invoice_orchestrator` is one **AgentNode**.
-- The occurrence under `payment_orchestrator` is another **AgentNode**.
+- The occurrence under `knowledge_router` is one **AgentNode**.
+- The occurrence under `analysis_router` is another **AgentNode**.
 - Both point to the same `NodeDeclaration`.
 
 The compiler assigns each occurrence a **stable node path**, and the trace
@@ -302,15 +296,13 @@ same declaration are distinguishable in observability.
 
 ## 8. Dynamic Prompt Rendering
 
-Prompt files are **templates**, not finished text
-(see [ADR 0004](adr/0004-prompts-are-templates-rendered-per-request.md) and
-[ADR 0005](adr/0005-prompt-rendering-and-context-resolution.md)).
+Prompt files are **templates**, not finished text.
 
 - **Raw/parsed templates may be cached** (keyed by path/version).
 - **Rendered prompts are produced per request** — never rendered globally at
   startup and never cached across requests/tenants.
-- Values such as `customer_code`, `current_date`, `tenant_id`, `permissions`,
-  customer profile, `locale`, and `region` are **dynamic**, resolved per request.
+- Values such as `organization_id`, `current_date`, `tenant_id`, `permissions`,
+  user profile, `locale`, and `region` are **dynamic**, resolved per request.
 - Rendering is **strict by default**: a missing required variable fails clearly
   with a named error rather than silently emitting a blank.
 
@@ -368,8 +360,8 @@ a documentation/generation artifact, not a runtime input (see
 
 ```toml
 [resolvers]
-shared = "examples.plugins.resolvers.shared:SharedResolver"
-super_agent = "examples.plugins.resolvers.super_agent:Resolver"
+shared = "plugins.resolvers.shared:SharedResolver"
+super_agent = "plugins.resolvers.repository_agent:Resolver"
 ```
 
 ### Resolver file layout
@@ -399,7 +391,7 @@ plugins/
 | `children` | `agentctl generate agents.yml --mode children` | Generate/update agent files only; skip `shared.py` |
 | `child` | `agentctl generate agents.yml --mode child --agent super_agent` | Generate/update one agent file only |
 
-By default, existing customer implementations are preserved — only missing
+By default, existing client implementations are preserved — only missing
 method stubs are appended. Use `--force` to overwrite. Stale files and methods
 (scope changes, removed resolvers) are reported but never deleted automatically.
 
@@ -421,7 +413,7 @@ A **sidecar** is a **client-owned out-of-process service** that supplies
 client-specific behavior the runtime must not contain:
 
 - authentication / authorization
-- identity, tenant, and `customer_code` resolution
+- identity, tenant, and `organization_id` resolution
 - permission lookups
 - DB / API lookups
 - business context
@@ -433,7 +425,7 @@ sidecar advises; the runtime enforces.
 
 > Current status: the MVP extension mechanism is **in-process plugins** (§5, §9).
 > A separate sidecar service is a documented **future option** that would be
-> introduced with its own ADR and schema additions
+> introduced with its own design note and schema additions
 > (see [`SIDECAR_CONTEXT_AUTH.md`](SIDECAR_CONTEXT_AUTH.md)). The sidecar and
 > plugin models share the same principle: client logic lives outside the runtime
 > behind a fixed contract.
@@ -447,7 +439,7 @@ sidecar advises; the runtime enforces.
 Wording like this is **not** enforcement:
 
 ```text
-Only answer for customer {{ customer_code }}
+Only answer for organization {{ organization_id }}
 ```
 
 A capable model can be steered around prompt instructions, so security must be
@@ -459,19 +451,19 @@ The principle, expressed conceptually:
 ```yaml
 # Conceptual / future schema — per-tool input policy is NOT yet in the schema.
 tools:
-  invoice_search:
+  enterprise_docs_search:
     input_policy:
       inject:
-        customer_code: "{{ identity.customer_code }}"
+        organization_id: "{{ identity.organization_id }}"
       block_user_override:
-        - customer_code
+        - organization_id
 ```
 
 The intended guarantees:
 
-- the LLM **cannot choose** `customer_code`;
-- the user **cannot override** `customer_code`;
-- the runtime **injects** the trusted `customer_code` from resolved identity;
+- the LLM **cannot choose** `organization_id`;
+- the user **cannot override** `organization_id`;
+- the runtime **injects** the trusted `organization_id` from resolved identity;
 - tool execution is **constrained by runtime policy**, not by prompt wording.
 
 What is enforced **today** vs. **later**:
@@ -513,19 +505,19 @@ real external services:
 
 - a **mock LLM provider**
 - **mock tools / MCP**
-- a **simple YAML** config (the bundled [`examples/agents.yml`](../examples/agents.yml))
+- a **simple YAML** config (the bundled [`examples/enterprise-knowledge-assistant/agents.yaml`](../examples/enterprise-knowledge-assistant/agents.yaml))
 - **simple prompts**
 
 First-run flow status:
 
 ```bash
 make install
-agentctl validate examples/agents.yml                            # ✅ implemented
-agentctl inspect  examples/agents.yml                             # ✅ implemented (offline summary: agents, MCPs, hooks, plugins, tags)
-agentctl generate examples/agents.yml --mode all                 # ✅ implemented
-agentctl run      examples/agents.yml --message "hello"          # ✅ implemented (requires LLM API key)
-agentctl serve    examples/agents.yml                             # ✅ implemented (HTTP API; also the Docker CMD)
-agentctl chat     examples/agents.yml                             # ✅ implemented (interactive session)
+agentctl validate examples/enterprise-knowledge-assistant/agents.yaml                            # ✅ implemented
+agentctl inspect  examples/enterprise-knowledge-assistant/agents.yaml                             # ✅ implemented (offline summary: agents, MCPs, hooks, plugins, tags)
+agentctl generate examples/enterprise-knowledge-assistant/agents.yaml --mode all                 # ✅ implemented
+agentctl run      examples/enterprise-knowledge-assistant/agents.yaml --message "hello"          # ✅ implemented (requires LLM API key)
+agentctl serve    examples/enterprise-knowledge-assistant/agents.yaml                             # ✅ implemented (HTTP API; also the Docker CMD)
+agentctl chat     examples/enterprise-knowledge-assistant/agents.yaml                             # ✅ implemented (interactive session)
 ```
 
 All six CLI commands work today. `agentctl graph` from earlier plans shipped
@@ -551,7 +543,7 @@ manager (`build()` / `close()`); per-request state flows as `GraphState`.
 Orchestrators are **supervisor agents** — children are exposed as tools and the
 orchestrator synthesises the answer; the compiled graph is flat
 (`START → root → END`). Both orchestrators and agents run a tool-call loop until
-the model stops (see [ADR 0009](adr/0009-orchestrators-are-supervisor-agents.md)).
+the model stops.
 Per-run **execution-limit** guardrails (`ExecutionPolicy` in
 `agent_engine/core/execution.py`, enforced by `agent_engine/runtime/execution.py`)
 cap iterations, tool calls, and child-agent calls — see
@@ -581,7 +573,7 @@ in a tool-call loop. MCP servers connect via `langchain-mcp-adapters`
 are logged as a warning and skipped. Both local and remote MCP servers work,
 including authenticated MCP via runtime hooks
 (`agent_engine/loaders/mcp_auth_loader.py`). A separate **runtime hooks**
-system (`agent_engine/runtime/hooks/`, [ADR 0010](adr/0010-runtime-hooks.md),
+system (`agent_engine/runtime/hooks/`,
 [`RUNTIME_HOOKS.md`](RUNTIME_HOOKS.md)) covers 11 lifecycle points — engine
 start/stop, run start/end/error, tool error, and `transform_tool_result` (lets
 trusted code truncate/redact/normalize a tool result before it reaches the
@@ -592,8 +584,7 @@ still not implemented — see §11.
 **Model providers (✅ done, not in the original task list):**
 `agent_engine/models/factory.py` builds chat models via `init_chat_model` for
 both **Anthropic** and **Amazon Bedrock** (`ChatBedrockConverse`), with clear
-configuration errors for missing settings (see
-[ADR 0008](adr/0008-model-access-via-langchain-init-chat-model.md)).
+configuration errors for missing settings.
 
 **CLI (0008 — ✅ done):**
 `agentctl validate`, `agentctl inspect` (offline summary: agents, MCPs, hooks,

@@ -2,7 +2,7 @@
 
 This document describes the declarative Agent Engine configuration. The schema
 source for the current example is [`examples/config.schema.json`](../examples/config.schema.json),
-and the reference sample is [`examples/agents.yml`](../examples/agents.yml).
+and the reference sample is [`examples/enterprise-knowledge-assistant/agents.yaml`](../examples/enterprise-knowledge-assistant/agents.yaml).
 Validation, schema models, compilation, and runtime execution are implemented.
 
 The YAML has two conceptual halves:
@@ -171,11 +171,11 @@ discovered tools are bound (never exposed to the LLM as tags). See
 
 ```yaml
 mcps:
-  # Simple, recommended: tags only -> sent as X-MCP-Tool-Tag: invoices
-  businesscenter:
+  # Simple, recommended: tags only -> sent as X-MCP-Tool-Tag: policies
+  docs_platform:
     url: "https://mcp.company.com/mcp"
     tool_tags:
-      - "invoices"
+      - "policies"
 ```
 
 `tool_tag_transport` is an optional advanced override (custom header or a
@@ -184,9 +184,9 @@ mcps:
 
 ```yaml
 mcps:
-  legacy_billing:
+  partner_docs_platform:
     url: "https://mcp.company.com/mcp"
-    tool_tags: ["invoices", "customers"]
+    tool_tags: ["policies", "architecture"]
     tool_tag_transport: { type: query_param, param_name: "tag" }
 ```
 
@@ -259,8 +259,8 @@ generation metadata:
 
 ```toml
 [resolvers]
-shared = "examples.plugins.resolvers.shared:SharedResolver"
-domestic_flights_agent = "examples.plugins.resolvers.domestic_flights_agent:Resolver"
+shared = "plugins.resolvers.shared:SharedResolver"
+domestic_flights_agent = "plugins.resolvers.documentation_agent:Resolver"
 ```
 
 Methods receive `ctx`, which the engine builds from request headers and request
@@ -376,11 +376,11 @@ Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "messages": [{ "role": "user", "content": "Book me a flight to Eilat" }]
+  "messages": [{ "role": "user", "content": "Compare LangGraph and Temporal for building a research agent." }]
 }
 ```
 
-The engine passes headers and request data into `ctx`; customer plugin code
+The engine passes headers and request data into `ctx`; client plugin code
 interprets auth tokens and business identity.
 
 ---
@@ -397,5 +397,3 @@ interprets auth tokens and business identity.
 - Enforce access plugin requirements when `protected: true` exists.
 - Reject literal secrets in config and prompt paths.
 - Collect all validation errors with useful locations.
-
-→ See [ADR 0002](adr/0002-yaml-is-compiled-not-executed-directly.md).

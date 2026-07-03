@@ -100,32 +100,16 @@ The Playwright smoke tests mock the conversation endpoints for deterministic
 browser coverage. For a manual test against the real API, run `agent-manager`
 with a valid agent config and open the same demo pages.
 
-## Real Agent / Sub-Agent Flow Demo
+## Routing Evidence
 
-`/widget-agent-flow-demo.html` proves the full product path with **no mocks**:
-the widget talks to the real `/conversations` API, which runs the agent engine,
-which routes through a root orchestrator to a sub-agent and back.
-
-Run the deterministic demo config (root `concierge_router` → `tags_agent` /
-`hours_agent` sub-agents; Anthropic only, no MCP, no protected nodes):
-
-```bash
-agent-manager --config examples/widget_sub_agent_demo.yml --env .env --port 8100
-```
-
-Open `http://127.0.0.1:8100/widget-agent-flow-demo.html`, open the widget, and
-try:
-
-- `show me the available document tags` → routes to `tags_agent`
-- `what are your support hours?` → routes to `hours_agent`
-
-**Proof the sub-agent ran.** The `/conversations/{id}/messages` response
-includes a safe `visited` routing path (e.g.
-`["concierge_router", "concierge_router/tags_agent"]`). The widget emits this as
-an `agent-chat:answer` DOM event (and a `console.debug` line); the demo page
-renders it in a live "Routing evidence" panel. The same path appears in the
-server logs (`run ended … visited=…`). Only routing/tool metadata is exposed —
-never reasoning or hidden content.
+Against a real system (e.g. the flagship
+[`examples/enterprise-knowledge-assistant/agents.yaml`](../examples/enterprise-knowledge-assistant/agents.yaml)),
+the `/conversations/{id}/messages` response includes a safe `visited` routing
+path (e.g. `["research_router", "research_router/documentation_agent"]`) showing
+which orchestrator routed to which sub-agent. The widget emits this as an
+`agent-chat:answer` DOM event; the same path appears in the server logs
+(`run ended … visited=…`). Only routing/tool metadata is exposed — never
+reasoning or hidden content.
 
 Host pages can consume the same signal:
 

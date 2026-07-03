@@ -33,10 +33,10 @@ supported yet.
 
 ### Optional tool-discovery tags (`tool_tags`)
 
-Some MCP servers expose grouped tool sets (e.g. `invoices`, `customers`,
-`documents`, `admin`) and return only the tools for a selector supplied during
-discovery. `tool_tags` is an **optional, per-server** list that carries that
-selector — and for the common case it's all you need:
+Some MCP servers expose grouped tool sets (e.g. `policies`, `architecture`,
+`documentation`, `admin`) and return only the tools for a selector supplied
+during discovery. `tool_tags` is an **optional, per-server** list that carries
+that selector — and for the common case it's all you need:
 
 ```yaml
 mcps:
@@ -45,12 +45,12 @@ mcps:
     url: "https://mcp.deepwiki.com/mcp"
 
   # Recommended: just list the tags. The selector is sent by default as the
-  # header `X-MCP-Tool-Tag: invoices` (comma-joined for multiple tags).
-  businesscenter:
+  # header `X-MCP-Tool-Tag: policies` (comma-joined for multiple tags).
+  docs_platform:
     url: "https://mcp.company.com/mcp"
     tool_tags:
-      - "invoices"
-      - "customers"          # -> X-MCP-Tool-Tag: invoices,customers
+      - "policies"
+      - "architecture"          # -> X-MCP-Tool-Tag: policies,architecture
 ```
 
 **Default transport.** Neither MCP `tools/list` nor `langchain-mcp-adapters` has
@@ -58,7 +58,7 @@ a native tag/filter argument, so the selector travels at the transport layer.
 When you don't say how, the platform uses a **default header transport**:
 
 - header name: `X-MCP-Tool-Tag`
-- value: the tags, comma-joined (e.g. `invoices,customers`)
+- value: the tags, comma-joined (e.g. `policies,architecture`)
 
 ### Advanced: overriding the transport
 
@@ -68,15 +68,15 @@ expect a different header or a query parameter:
 ```yaml
 mcps:
   # Custom header name.
-  company_billing:
+  internal_docs_platform:
     url: "https://mcp.company.com/mcp"
-    tool_tags: ["invoices"]
+    tool_tags: ["policies"]
     tool_tag_transport: { type: header, header_name: "X-Company-MCP-Tag" }
 
   # Query parameter instead of a header.
-  legacy_billing:
+  partner_docs_platform:
     url: "https://mcp.company.com/mcp"
-    tool_tags: ["invoices", "customers"]
+    tool_tags: ["policies", "architecture"]
     tool_tag_transport: { type: query_param, param_name: "tag" }
 ```
 
@@ -248,16 +248,19 @@ docs before implementation.
 
 ---
 
-## Manual Smoke Test: DeepWiki Remote MCP
+## Manual Smoke Test: Remote MCP (flagship example)
 
-`examples/deepwiki_mcp_agents.yml` is a richer manual smoke-test configuration
-for a real public remote MCP server. It demonstrates the intended user
-experience for remote MCP: declare a server URL, grant an agent access with
-`agent.mcps`, and let the platform create the generic MCP client automatically.
+The flagship
+[`examples/enterprise-knowledge-assistant/agents.yaml`](../examples/enterprise-knowledge-assistant/agents.yaml)
+wires two real remote MCP servers — a public one (DeepWiki) and an authenticated
+one (Context7). It demonstrates the intended user experience for remote MCP:
+declare a server URL, grant an agent access with `agent.mcps`, and let the
+platform create the generic MCP client automatically. No stdio configuration,
+command/args, or per-server client code is needed.
 
-DeepWiki is used only as a public remote MCP example for validating runtime
-integration. It is not part of `make check`, and automated tests do not call the
-real service.
+These remote servers are used only as public/authenticated MCP examples for
+validating runtime integration. They are not part of `make check`, and automated
+tests do not call the real services.
 
 The MCP declaration is URL-only:
 
@@ -267,16 +270,11 @@ mcps:
     url: "https://mcp.deepwiki.com/mcp"
 ```
 
-The `deepwiki_agent` declares `mcps: [deepwiki]`, so its model may call tools
-discovered from the DeepWiki MCP server. There is no stdio configuration,
-command/args, authentication, custom client code, or DeepWiki-specific client
-class. The MCP client handles connection and discovery during `build()`.
-
-Validate (and inspect) the example offline, without contacting DeepWiki:
+Validate (and inspect) the example offline, without contacting any server:
 
 ```bash
-agentctl validate examples/deepwiki_mcp_agents.yml
-agentctl inspect  examples/deepwiki_mcp_agents.yml   # shows MCP url, tool_tags, transport
+agentctl validate examples/enterprise-knowledge-assistant/agents.yaml
+agentctl inspect  examples/enterprise-knowledge-assistant/agents.yaml   # MCP url, tool_tags, transport
 ```
 
 `inspect` prints each MCP server's `tool_tags` and the effective
@@ -284,29 +282,15 @@ agentctl inspect  examples/deepwiki_mcp_agents.yml   # shows MCP url, tool_tags,
 without connecting to any server.
 
 Run the manual smoke test when provider dependencies and credentials are
-available:
+available (copy `.env.example` to `.env` first):
 
 ```bash
-agentctl run --config examples/deepwiki_mcp_agents.yml \
-  --message "Use DeepWiki to ask what the public GitHub repository modelcontextprotocol/python-sdk is about"
+agentctl run --config examples/enterprise-knowledge-assistant/agents.yaml \
+  --env examples/enterprise-knowledge-assistant/.env \
+  --message "Use DeepWiki to explain what the repository modelcontextprotocol/python-sdk is about."
 ```
 
-To stream the final assistant answer as it is generated, add `--stream`:
-
-```bash
-agentctl run --config examples/deepwiki_mcp_agents.yml --stream \
-  --message "Use DeepWiki to explain what the public GitHub repository modelcontextprotocol/python-sdk is about."
-```
-
-Additional useful prompts (pass each via `--message`):
-
-```bash
-agentctl run --config examples/deepwiki_mcp_agents.yml \
-  --message "Use DeepWiki to inspect the wiki structure for modelcontextprotocol/python-sdk."
-
-agentctl run --config examples/deepwiki_mcp_agents.yml \
-  --message "Use DeepWiki to explain the main modules in langchain-ai/langchain."
-```
+To stream the final assistant answer as it is generated, add `--stream`.
 
 The current sample model uses Anthropic via LangChain. To run it through Amazon
 Bedrock instead, set a Bedrock model in YAML and configure AWS normally:

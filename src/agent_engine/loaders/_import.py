@@ -1,6 +1,6 @@
 """Shared by-path plugin loading, used by tool/resolver/MCP-auth loaders.
 
-Customer plugin files (a tool, a per-agent resolver, an MCP-auth function) live
+Client plugin files (a tool, a per-agent resolver, an MCP-auth function) live
 under the YAML spec's `plugins/` directory, which is never added to `sys.path`.
 They are loaded by file path instead of by import path. This is the one place
 that implements that loading — `ToolLoader`, `ResolverLoader`, and

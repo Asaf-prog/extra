@@ -7,9 +7,6 @@ enrichment — **without forking the platform or writing per-server client code*
 This is the integration seam for embedding the platform inside a private
 application that already authenticates its users.
 
-> See [ADR 0010](adr/0010-runtime-hooks.md) for the binding decision and
-> rationale.
-
 ---
 
 ## Tools vs. hooks — they are different things
@@ -149,7 +146,7 @@ The plugin id is resolved through `plugins/plugins.toml`:
 
 ```toml
 [hooks.plugins]
-mcp_auth = "examples.plugins.hooks.mcp_auth:McpAuthHook"
+mcp_auth = "plugins.hooks.mcp_auth:McpAuthHook"
 ```
 
 The hook class is instantiated once when `HookManager` is built. The same
@@ -224,14 +221,14 @@ The robust, recommended way is to declare **plugin import roots** in the spec:
 ```yaml
 plugins:
   import_roots:
-    - ".."        # resolved relative to THIS YAML file, not the shell's CWD
+    - "."         # resolved relative to THIS YAML file, not the shell's CWD
 ```
 
 The engine resolves each root relative to the agent YAML's location and
 registers it on `sys.path` **before importing any plugin**, exactly once. In the
-bundled example, `examples/hooks_mcp_auth_agents.yml` sits in `examples/`, so
-`".."` is the repo root (which holds the `examples` package) — and
-`examples.plugins.hooks.mcp_auth:...` refs then import no matter where
+flagship example, `examples/enterprise-knowledge-assistant/agents.yaml` sits
+next to its own `plugins/` package, so `"."` resolves to that directory — and
+`plugins.hooks.research_hooks:...` refs then import no matter where
 `agentctl` was launched from. **No `PYTHONPATH` needed.**
 
 Notes:
@@ -249,31 +246,31 @@ All client extension code lives under **one** plugin package so resolvers,
 tools, and hooks sit together, described by **one** manifest:
 
 ```
-examples/
-  hooks_mcp_auth_agents.yml      # agent spec (NOT inside the Python package)
+enterprise-knowledge-assistant/
+  agents.yaml                    # agent spec (NOT inside the Python package)
   plugins/
     __init__.py
     plugins.toml                 # maps managed hook ids; catalogs other refs
     resolvers/   __init__.py …   # loaded by file path
     tools/       __init__.py …   # loaded by file path
     hooks/       __init__.py
-      mcp_auth.py                # loaded by import path
+      research_hooks.py          # loaded by import path
 ```
 
 Hooks, resolvers, and tools remain separate runtime concepts but share one
 package and one manifest. The agent YAML stays **outside** the importable Python
 package (app config is not plugin code). Managed hook YAML uses plugin ids such
-as `mcp_auth`, while `plugins.toml` maps those ids to importable class paths.
+as `research_hooks`, while `plugins.toml` maps those ids to importable class paths.
 
-Because the example declares `plugins.import_roots: [".."]`, these refs resolve
-from any working directory — `examples/`, `examples/plugins/`, and
-`examples/plugins/hooks/` are packages, and the repo root is registered on
-`sys.path` at build time. For your own project, declare an `import_roots` entry
-(or install the package with `pip install -e .`).
+Because the example declares `plugins.import_roots: ["."]`, these refs resolve
+from any working directory — `plugins/` and `plugins/hooks/` are packages, and
+the spec's own directory is registered on `sys.path` at build time. For your own
+project, declare an `import_roots` entry (or install the package with
+`pip install -e .`).
 
 ### The `plugins.toml` manifest
 
-`examples/plugins/plugins.toml` is a single manifest for **all** client
+`examples/enterprise-knowledge-assistant/plugins/plugins.toml` is a single manifest for **all** client
 extension code — `[hooks]`, `[resolvers]`, `[tools]` (plus `[package]` and
 `[paths]`). There is intentionally **no** per-type file (`hooks.toml`,
 `resolvers.toml`, `tools.toml`).
@@ -368,8 +365,7 @@ result = await engine.run(message, context=ctx)
 `engine.run(message)` with no context stays fully backwards compatible — a
 `RunContext` with an auto-generated `run_id` is created internally. During the
 run the context is held in a `contextvars.ContextVar`, so MCP and tool hooks
-reach the active identity without the shared engine storing request state
-(per [ADR 0001](adr/0001-runtime-engine-created-once.md)).
+reach the active identity without the shared engine storing request state.
 
 ---
 

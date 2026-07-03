@@ -133,7 +133,7 @@ class PluginsConfig:
     """Plugin loading configuration.
 
     ``import_roots`` are directories to put on ``sys.path`` so package-path
-    plugin refs (e.g. ``examples.plugins.hooks.x:fn``) import reliably. Each is
+    plugin refs (e.g. ``plugins.hooks.x:fn``) import reliably. Each is
     resolved relative to the agent YAML file, not the shell's working directory.
     """
 

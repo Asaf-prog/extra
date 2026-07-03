@@ -15,8 +15,7 @@ the lifecycle and seams that prompts (0005), plugin context/access (0006), and
 tools (0007) plug into.
 
 **Read first:** `AGENTS.md`, `.ai/skills/runtime-engine.md`,
-`docs/RUNTIME_LIFECYCLE.md`,
-`docs/adr/0001-runtime-engine-created-once.md`.
+`docs/RUNTIME_LIFECYCLE.md`.
 
 ## Scope
 
@@ -76,5 +75,5 @@ make check
 
 ## Expected final report
 
-Use the AGENTS.md §9 format. Confirm ADR 0001 is respected (engine once, context
+Use the AGENTS.md §9 format. Confirm the engine-lifecycle invariant is respected (engine once, context
 per request, no shared request state). Recommend task 0005 next.

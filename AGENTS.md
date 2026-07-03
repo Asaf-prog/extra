@@ -16,20 +16,19 @@ runtime that renders prompt files, calls resolver/tool plugins and MCP servers,
 exposes an API, and produces execution traces.
 
 The repository is in **active development**. The YAML validator, compiler,
-runtime engine (orchestrators run as supervisor agents — see
-[ADR 0009](docs/adr/0009-orchestrators-are-supervisor-agents.md)), resolver
+runtime engine (orchestrators run as supervisor agents), resolver
 plugin system, tool plugin loading, MCP client (local and remote servers,
 including authenticated MCP via hooks), the runtime hooks system
-(11 lifecycle points — see [ADR 0010](docs/adr/0010-runtime-hooks.md) and
+(11 lifecycle points — see
 [docs/RUNTIME_HOOKS.md](docs/RUNTIME_HOOKS.md)), per-run execution-limit
 guardrails (see [docs/EXECUTION_LIMITS.md](docs/EXECUTION_LIMITS.md)), prompt
 rendering, and the CLI (`validate`, `inspect`, `generate`, `run`, `serve`,
 `chat`) are implemented. Model access supports both Anthropic and Amazon
 Bedrock. Two HTTP API layers exist: a thin `agent_engine` API (`/invoke`,
 `/stream`), started by `agentctl serve` (default port `8080`) — stateless, no
-persistence, no widget — and `agent_manager` — a conversation lifecycle
+persistence, no web client — and `agent_manager` — a conversation lifecycle
 service built on top of it with SQLite-backed persistence, SSE streaming, and
-an embeddable JS/React chat widget, started by the separate `agent-manager`
+the official React web client, started by the separate `agent-manager`
 console script (default port `8100`). `agentctl chat` is a separate, ephemeral
 developer console that persists nothing (see `docs/ARCHITECTURE.md` §14 for
 detail). Basic observability
@@ -82,7 +81,6 @@ request, create an `ExecutionContext`, filter protected nodes, route to a node
 instance, render prompts, execute, call tools/MCP, return response + trace;
 (3) **client extension** — client-specific auth/business logic lives in
 plugins, never in the generic runtime.
-→ See [ADR 0007](docs/adr/0007-build-phase-separate-from-runtime-phase.md).
 
 ---
 
@@ -112,17 +110,12 @@ to ask for it. If a rule blocks you, stop and raise it.
 15. **Secrets must never be stored in YAML or prompt files.**
 16. **Every meaningful behavior must have tests.**
 
-See `docs/adr/` for the rationale behind the most important rules. In
-particular, **read
-[ADR 0005](docs/adr/0005-prompt-rendering-and-context-resolution.md) before
-changing prompt rendering or resolver behavior**,
-and **read
-[ADR 0006](docs/adr/0006-reusable-agent-definitions-and-hierarchy-instances.md)
-before changing how reusable node declarations, graph instances, or execution
-work** (the runtime executes compiled *instances*, not raw declarations), and
-**read
-[ADR 0007](docs/adr/0007-build-phase-separate-from-runtime-phase.md) before
-blurring the build, runtime, and client-extension phases.**
+The relevant design docs under `docs/` carry the rationale for these rules.
+In particular, read [docs/PROMPT_RENDERING.md](docs/PROMPT_RENDERING.md) before
+changing prompt rendering or resolver behavior; the runtime executes compiled
+node *instances*, not raw declarations; and keep the build, runtime, and
+client-extension phases separate (see
+[docs/RUNTIME_LIFECYCLE.md](docs/RUNTIME_LIFECYCLE.md)).
 
 ---
 
@@ -155,12 +148,11 @@ split, not the original plan:
 │   ├── WIDGET.md
 │   ├── WIDGET_ARCHITECTURE.md
 │   ├── CLAUDE_CODE_WORKFLOW.md
-│   ├── DEVELOPMENT_WORKFLOW.md
-│   └── adr/                   ← architecture decision records
+│   └── DEVELOPMENT_WORKFLOW.md
 ├── .ai/                       ← canonical agent instructions (skills/roles/workflows)
 ├── tasks/                     ← small, ordered implementation tasks (historical plan;
 │                                 see the package layout below for what actually exists)
-├── examples/                  ← runnable YAML configs, prompts, and example plugins
+├── examples/                  ← the flagship example (enterprise-knowledge-assistant) + schema
 ├── tests/                     ← pytest suite (unit, engine, cli, e2e, agent_manager, ...)
 └── src/
     ├── agent_engine/          ← pure execution engine (validate → compile → run)
@@ -178,16 +170,15 @@ split, not the original plan:
     │   ├── application/            ConversationService (send/stream, prior-context assembly)
     │   ├── infrastructure/persistence/  SQLite (default) + Alembic migrations
     │   └── api/                    FastAPI app: `/conversations` endpoints, SSE streaming,
-    │                                embeddable JS/React chat widget (`api/static/widget/`)
+    │                                official React web client (`api/static/widget/`)
     └── agentctl/              ← CLI: validate, inspect, generate, run, serve, chat
 ```
 
 `agent_engine` never imports `agent_manager`; `agent_manager` only calls
 `agent_engine` through the `Engine` / `RunResult` / `RunStreamEvent` ports —
-this boundary is load-bearing (see §3 rule 11 and
-[ADR 0003](docs/adr/0003-client-specific-logic-lives-in-sidecar.md)). There is
+this boundary is load-bearing (see §3 rule 11). There is
 no separate `src/agentplatform/` package and no standalone `frontend/` app in
-active use — the real web client is the embeddable widget under
+active use — the official React web client is served from
 `src/agent_manager/api/static/widget/`.
 
 ---
@@ -280,7 +271,7 @@ Current order: `0001` foundation → `0002` YAML schema → `0003` compiled grap
   not implemented, say so.
 - **No secrets**, ever, in code, YAML, prompts, or fixtures.
 - **No client-specific business logic** in the runtime — that belongs in
-  customer plugins.
+  client plugins.
 - **Tests accompany behavior.** New meaningful behavior ships with tests.
 
 ---
@@ -325,7 +316,7 @@ When you finish a task, respond using exactly this structure:
   effect of another task.
 - **Never** reformat or move files outside your task's scope.
 - **Never** change public contracts (YAML schema, plugin contracts, API shape)
-  without an ADR and explicit approval.
+  without a design note and explicit approval.
 - If a change would touch many files or alter architecture, **stop and propose
   it as its own task** instead of doing it inline.
 - When in doubt, do less and ask.

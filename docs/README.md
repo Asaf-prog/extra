@@ -6,8 +6,8 @@ meant to work**. The core pipeline (validate → compile → runtime → prompts
 resolver plugins → tool plugins → MCP → CLI) is implemented, with orchestrators
 running as supervisor agents. Runtime hooks, execution-limit guardrails, an
 Anthropic/Bedrock model layer, basic observability, a Docker image, and two
-HTTP API layers — a thin stateless engine API and a conversation-persistence
-service (`agent_manager`) with an embeddable chat widget — are also
+HTTP API layers — a thin stateless engine API and a conversation-aware
+service (`agent_manager`) with the official React web client — are also
 implemented; see [ARCHITECTURE.md](ARCHITECTURE.md) §14 for the current
 per-layer status. The access plugin is wired into child filtering, but the
 request-context gate that should feed it real identity is not yet
@@ -28,22 +28,6 @@ implemented, so protected-node access control is not actually enforced today.
 11. [CLAUDE_CODE_WORKFLOW.md](CLAUDE_CODE_WORKFLOW.md) — using Claude Code in this repo.
 12. [DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md) — how to work in this repo.
 13. [ROADMAP.md](ROADMAP.md) — phased plan.
-
-## Architecture Decision Records
-
-The [`adr/`](adr/) directory records the binding decisions that shape the
-codebase. Read them before changing anything they cover:
-
-- [0001 — RuntimeEngine created once](adr/0001-runtime-engine-created-once.md)
-- [0002 — YAML is compiled, not executed directly](adr/0002-yaml-is-compiled-not-executed-directly.md)
-- [0003 — Client-specific logic lives in plugins](adr/0003-client-specific-logic-lives-in-sidecar.md)
-- [0004 — Prompts are templates rendered per request](adr/0004-prompts-are-templates-rendered-per-request.md)
-- [0005 — Prompt templates are rendered per request using resolved context](adr/0005-prompt-rendering-and-context-resolution.md)
-- [0006 — Reusable node declarations and agent nodes](adr/0006-reusable-agent-definitions-and-hierarchy-instances.md)
-- [0007 — Build/compile phase is separate from the runtime/execution phase](adr/0007-build-phase-separate-from-runtime-phase.md)
-- [0008 — Model access via init_chat_model](adr/0008-model-access-via-langchain-init-chat-model.md)
-- [0009 — Orchestrators are supervisor agents (children exposed as tools)](adr/0009-orchestrators-are-supervisor-agents.md)
-- [0010 — Runtime hooks are a separate concept from tools](adr/0010-runtime-hooks.md)
 
 ## Relationship to other directories
 

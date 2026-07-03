@@ -11,7 +11,7 @@ The API is a surface over the runtime. The most important rule: build the engine
 once at application startup (lifespan/startup hook), never per request.
 
 **Read first:** `AGENTS.md`, `.ai/skills/runtime-engine.md`,
-`docs/RUNTIME_LIFECYCLE.md`, `docs/adr/0001-runtime-engine-created-once.md`,
+`docs/RUNTIME_LIFECYCLE.md`,
 `docs/ARCHITECTURE.md` (API layer).
 
 ## Scope
@@ -34,7 +34,7 @@ once at application startup (lifespan/startup hook), never per request.
   requests.
 - Each request gets a fresh `ExecutionContext`; no request state on the engine.
 - Protected-node access filtering runs before routing; auth/context behavior is
-  delegated to customer plugins (no client-specific logic in the API).
+  delegated to client plugins (no client-specific logic in the API).
 - A health endpoint and an invoke endpoint at minimum.
 - Errors return appropriate HTTP status codes; secrets are never returned.
 
@@ -62,5 +62,5 @@ make check
 
 ## Expected final report
 
-Use the AGENTS.md §9 format. Confirm ADR 0001 at the API boundary (engine once,
+Use the AGENTS.md §9 format. Confirm the engine-lifecycle invariant at the API boundary (engine once,
 context per request). Recommend task 0010 next.

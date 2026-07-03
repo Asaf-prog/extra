@@ -1,4 +1,4 @@
-"""Build a chat model from resolved model config (see ADR 0008).
+"""Build a chat model from resolved model config.
 
 This is the single chokepoint that translates provider + name + temperature
 into a LangChain ``BaseChatModel``. The runtime depends only on

@@ -7,8 +7,6 @@ most important rule in this repository lives here:
 > `ExecutionContext` is created per request. Never create a runtime per
 > request.**
 
-→ See [ADR 0001](adr/0001-runtime-engine-created-once.md).
-
 ---
 
 ## Two lifecycles
@@ -113,7 +111,7 @@ final event.
 
 What does **not** belong on `RuntimeEngine`:
 
-- The current `user_id`, `tenant_id`, `customer_code`, identity, or permissions.
+- The current `user_id`, `tenant_id`, `organization_id`, identity, or permissions.
 - The current request message.
 - Rendered prompts for a specific request.
 - The current trace path or tool results.

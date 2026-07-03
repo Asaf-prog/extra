@@ -4,8 +4,8 @@ This document defines the current context and access model. The filename is
 kept for link stability, but the current MVP design is plugin-based rather than
 sidecar-first.
 
-Customer-specific authentication, authorization, database access, REST clients,
-and business context live in customer Python plugins. The engine remains generic:
+Client-specific authentication, authorization, database access, REST clients,
+and business context live in client Python plugins. The engine remains generic:
 it loads plugins, calls fixed methods, maps results into request execution, and
 traces decisions.
 
@@ -26,8 +26,8 @@ Content-Type: application/json
 ```
 
 For each request, the runtime builds `ctx` from headers and request data. Plugin
-methods receive `ctx`; customer code decides how to interpret tokens, user ids,
-tenant ids, roles, subscriptions, and business data.
+methods receive `ctx`; client code decides how to interpret tokens, user ids,
+tenant ids, roles, and permissions.
 
 ---
 
@@ -46,15 +46,15 @@ resolvers:
     scope: shared        # generated on BaseResolver, inherited by all agents
   user_name:
     scope: shared
-  subscription:
+  experience_level:
     scope: agent         # generated only on the declaring agent's subclass
 
 agents:
-  super_agent:
-    description: "Handle supermarket orders."
+  learning_planner_agent:
+    description: "Produces personalized learning roadmaps and study plans."
     prompts:
-      system: "prompts/super/system.md"
-    resolvers: [current_date, user_name, subscription]
+      system: "prompts/learning_planner_agent/system.md"
+    resolvers: [current_date, user_name, experience_level]
 ```
 
 ### Generated file layout
@@ -68,9 +68,9 @@ plugins/
   resolvers/
     __init__.py
     shared.py                    # SharedResolver with shared methods
-    domestic_flights_agent.py    # agent-specific Resolver subclass
-    international_flights_agent.py
-    super_agent.py
+    documentation_agent.py       # agent-specific Resolver subclass
+    repository_agent.py
+    learning_planner_agent.py
 ```
 
 ### Manifest entry
@@ -81,40 +81,36 @@ resolvers, and tools — documentation/generation only, not read at runtime):
 
 ```toml
 [resolvers]
-shared = "examples.plugins.resolvers.shared:SharedResolver"
-super_agent = "examples.plugins.resolvers.super_agent:Resolver"
+shared = "plugins.resolvers.shared:SharedResolver"
+learning_planner_agent = "plugins.resolvers.learning_planner_agent:Resolver"
 ```
 
-### Customer implementation
+### Client implementation
 
 ```python
-# plugins/resolvers/base.py
-from agentplatform.runtime import ExecutionContext
+# plugins/resolvers/shared.py
+from agent_engine.runtime.hooks import RunContext
 
-class BaseResolver:
-    def __init__(self, rest_client: object | None = None) -> None:
-        self.rest_client = rest_client
-
-    def current_date(self, ctx: ExecutionContext) -> str:
+class SharedResolver:
+    def current_date(self, ctx: RunContext) -> str:
         return "2026-06-12"
 
-    def user_name(self, ctx: ExecutionContext) -> str:
-        return "Amit"
+    def user_name(self, ctx: RunContext) -> str:
+        return "Jordan"
 ```
 
 ```python
-# plugins/resolvers/super_agent.py
-from plugins.resolvers.base import BaseResolver
-from agentplatform.runtime import ExecutionContext
+# plugins/resolvers/learning_planner_agent.py
+from plugins.resolvers.shared import SharedResolver
+from agent_engine.runtime.hooks import RunContext
 
-class SuperAgentResolver(BaseResolver):
-    def subscription(self, ctx: ExecutionContext) -> str:
-        return "premium"
+class Resolver(SharedResolver):
+    def experience_level(self, ctx: RunContext) -> str:
+        return "intermediate"
 ```
 
-`SuperAgentResolver` inherits `current_date` and `user_name` from
-`BaseResolver`. Only `subscription` (agent-scoped) needs an implementation in
-the child class.
+`Resolver` inherits `current_date` and `user_name` from `SharedResolver`. Only
+`experience_level` (agent-scoped) needs an implementation in the child class.
 
 ### Generation modes
 
@@ -122,7 +118,7 @@ the child class.
 | ---- | ------- | ------ |
 | `all` | `agentctl generate agents.yml --mode all` | Regenerate base, all agents, TOML |
 | `children` | `agentctl generate agents.yml --mode children` | Agent files only; skip base |
-| `child` | `agentctl generate agents.yml --mode child --agent super_agent` | One agent file only |
+| `child` | `agentctl generate agents.yml --mode child --agent learning_planner_agent` | One agent file only |
 
 Use `--force` to overwrite existing files. Without `--force`, existing method
 bodies are preserved and only missing stubs are appended. Stale methods (scope
@@ -179,9 +175,9 @@ Rules:
 
 ## Why Not YAML Roles?
 
-The engine should not invent a role model. Customers already have auth and RBAC
-systems. The access plugin receives the request context and node id, then asks
-the customer's existing system whether access is allowed.
+The engine should not invent a role model. Client applications already have
+auth and RBAC systems. The access plugin receives the request context and node
+id, then asks the client's existing system whether access is allowed.
 
 This keeps adoption fast and avoids baking one company's permission model into
 the generic runtime.
@@ -191,15 +187,15 @@ the generic runtime.
 ## Future Sidecar Option
 
 A separate sidecar service may still be useful later for stronger isolation or
-non-Python customer logic. If reintroduced, it should be treated as another
-extension boundary with an explicit ADR and updated schema. The current schema
+non-Python client logic. If reintroduced, it should be treated as another
+extension boundary with a design note and updated schema. The current schema
 and example do not declare a sidecar.
 
 ---
 
 ## Validation Checklist
 
-- [ ] Customer-specific logic stays in plugins, not the engine.
+- [ ] Client-specific logic stays in plugins, not the engine.
 - [ ] Protected nodes require the fixed access plugin.
 - [ ] Access failures fail closed by hiding protected nodes.
 - [ ] Resolver ids referenced by nodes exist in top-level `resolvers`.

@@ -8,7 +8,7 @@ current MVP.**
 
 ## Context
 
-Customer-specific auth/business logic lives in plugins, not the runtime. The
+client-specific auth/business logic lives in plugins, not the runtime. The
 runtime loads plugin classes, calls fixed methods with `ctx`, maps returned
 values, fails closed for protected access, and traces decisions.
 
@@ -32,7 +32,7 @@ values, fails closed for protected access, and traces decisions.
 
 ## Requirements
 
-- No customer-specific auth/business logic in the runtime.
+- No client-specific auth/business logic in the runtime.
 - Resolver ids referenced by a node call the configured plugin method.
 - Protected nodes are hidden from routing unless access returns true.
 - `protected: true` without access plugin is a startup/configuration error.
@@ -42,7 +42,7 @@ values, fails closed for protected access, and traces decisions.
 ## Out of scope
 
 - Tool plugin execution internals (task 0007).
-- Real customer plugin implementations beyond fakes/fixtures.
+- Real client plugin implementations beyond fakes/fixtures.
 - Sidecar HTTP service support.
 
 ## Acceptance criteria
@@ -51,7 +51,7 @@ values, fails closed for protected access, and traces decisions.
 - [ ] Protected nodes are filtered before routing.
 - [ ] Access denial/error hides protected nodes and is traced.
 - [ ] Missing required access plugin is a clear configuration error.
-- [ ] No customer-specific logic is added to the runtime.
+- [ ] No client-specific logic is added to the runtime.
 - [ ] Tests cover allow/deny/error/missing-plugin cases.
 - [ ] `make check` passes.
 
@@ -63,5 +63,5 @@ make check
 
 ## Expected final report
 
-Use the AGENTS.md §9 format. Confirm customer logic remains in plugins,
+Use the AGENTS.md §9 format. Confirm client logic remains in plugins,
 protected access fails closed, and task 0007 is recommended next.

@@ -39,7 +39,7 @@ container and compose setup; it does not introduce production topology.
 ## Out of scope
 
 - Production orchestration (Kubernetes, scaling, TLS termination).
-- Real customer plugin implementations.
+- Real client plugin implementations.
 - Observability backends (task 0011).
 
 ## Acceptance criteria

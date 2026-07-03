@@ -43,7 +43,7 @@ Current CLI checks:
 
 ```bash
 agentctl version
-agentctl validate examples/agents.yml
+agentctl validate examples/enterprise-knowledge-assistant/agents.yaml
 ```
 
 ## Coding standards
@@ -67,8 +67,8 @@ agentctl validate examples/agents.yml
 - Only touch files listed in the task's "Files allowed to change".
 - Discovered out-of-scope work → propose a **new task**, don't expand the
   current one.
-- Contract changes (YAML schema, plugin contracts, API shape) require an **ADR**
-  and explicit approval. → See [`docs/adr/`](adr/).
+- Contract changes (YAML schema, plugin contracts, API shape) require a
+  **design note** and explicit approval.
 
 ## Definition of done (per task)
 

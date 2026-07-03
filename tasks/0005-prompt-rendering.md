@@ -12,8 +12,7 @@ Prompts are templates; parsed templates are cached, rendered output never is.
 Values are resolved per request. This task fills the prompt seam created in 0004.
 
 **Read first:** `AGENTS.md`, `.ai/skills/prompt-rendering.md`,
-`docs/PROMPT_RENDERING.md`,
-`docs/adr/0004-prompts-are-templates-rendered-per-request.md`.
+`docs/PROMPT_RENDERING.md`.
 
 ## Scope
 
@@ -60,5 +59,5 @@ make check
 
 ## Expected final report
 
-Use the AGENTS.md §9 format. Confirm ADR 0004 (templates cached, rendered output
+Use the AGENTS.md §9 format. Confirm the prompt-rendering invariant (templates cached, rendered output
 not; per-request rendering; loud failures). Recommend task 0006 next.

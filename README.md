@@ -72,9 +72,6 @@ per-phase status.
   of the working directory.
 - **Unified plugin package** — `plugins/` (`hooks/`, `resolvers/`, `tools/`) with
   a single `plugins.toml` manifest.
-- **Local example MCP server** — a runnable server for end-to-end smoke testing
-  of discovery, tags, and auth headers (see
-  [examples/local_mcp_server/](examples/local_mcp_server/)).
 - **Observability** — pluggable LangChain callback backends injected into the
   engine: a logging trace (always on) and **Langfuse** tracing that self-enables
   when `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` are set.
@@ -84,11 +81,12 @@ per-phase status.
 
 Flat sections declare *what exists*; `graph` declares the runtime topology. See
 [docs/YAML_SPEC.md](docs/YAML_SPEC.md) for the full specification and
-[examples/agents.yml](examples/agents.yml).
+[examples/enterprise-knowledge-assistant/agents.yaml](examples/enterprise-knowledge-assistant/agents.yaml)
+for the complete flagship example. A minimal shape:
 
 ```yaml
 system:
-  name: "GlobalCorp AI System"
+  name: "Knowledge Assistant"
 
 defaults:
   model:
@@ -96,47 +94,47 @@ defaults:
     name: claude-sonnet-4-6
 
 tools:
-  book_flight:
-    description: "Search and book a flight given origin, destination and travel date"
+  build_learning_plan:
+    description: "Build a personalized learning roadmap from research findings"
 
 resolvers:
   current_date:
     scope: shared
 
 mcps:
-  businesscenter:
-    url: "https://mcp.company.com/mcp"
-    tool_tags: ["invoices"]          # optional; sent as X-MCP-Tool-Tag by default
+  docs_server:
+    url: "https://mcp.example.com/mcp"
+    tool_tags: ["reference"]         # optional; sent as X-MCP-Tool-Tag by default
 
 orchestrators:
-  main_router:
-    description: "Routes the user by topic."
+  research_router:
+    description: "Routes the user's request to the right specialist."
     prompts:
-      orchestrator: "prompts/main_router/orchestrator.md"
+      orchestrator: "prompts/research_router/orchestrator.md"
 
 agents:
-  domestic_flights_agent:
-    description: "Search and book flights within the country."
+  documentation_agent:
+    description: "Answers questions from official documentation."
     prompts:
-      system: "prompts/domestic_flights/system.md"
+      system: "prompts/documentation_agent/system.md"
     resolvers: [current_date]
-    tools: [book_flight]
-    mcps: [businesscenter]
+    tools: [build_learning_plan]
+    mcps: [docs_server]
 
 # Optional: trusted lifecycle hooks (auth/policy/audit) — never seen by the LLM.
 hooks:
   before_mcp_request:
     - plugin: mcp_auth
       method: before_mcp_request
-      config: { credential_env: INTERNAL_DOCS_CREDENTIAL }
+      config: { credential_env: DOCS_SERVER_CREDENTIAL }
 
 # Optional: make package-path plugin refs importable from anywhere.
 plugins:
   import_roots: ["."]
 
 graph:
-  main_router:
-    domestic_flights_agent:
+  research_router:
+    documentation_agent:
 ```
 
 ### Flagship example: Enterprise Knowledge Assistant
@@ -195,8 +193,11 @@ client**, run the separate **`agent-manager`** console script instead (default
 port `8100`; see [`docs/WIDGET.md`](docs/WIDGET.md)):
 
 ```bash
-agent-manager --config examples/agents.yml --port 8100
+agent-manager --config examples/enterprise-knowledge-assistant/agents.yaml --port 8100
 ```
+
+Then open `http://127.0.0.1:8100/demo` to use the official React web client
+against your system.
 
 ### Engine API vs. Agent Manager API
 
@@ -212,15 +213,14 @@ Two HTTP tiers exist, and the difference matters:
   serves the official React web client.
 
 `agent_engine` never imports `agent_manager` — the dependency only goes one way,
-through the `Engine` / `RunResult` port (see
-[ADR 0003](docs/adr/0003-client-specific-logic-lives-in-sidecar.md)).
+through the `Engine` / `RunResult` port.
 
 `validate` and `inspect` are **fully offline** — no LLM calls, no MCP network,
 no tool execution:
 
 ```bash
-agentctl validate examples/local_mcp_agent_invoices.yml   # schema + import-roots + hooks + prompts
-agentctl inspect  examples/local_mcp_agent_invoices.yml   # agents, MCP url/tool_tags/transport, hooks
+agentctl validate examples/enterprise-knowledge-assistant/agents.yaml   # schema + import-roots + hooks + prompts
+agentctl inspect  examples/enterprise-knowledge-assistant/agents.yaml   # agents, MCP url/tool_tags/transport, hooks
 ```
 
 `validate` runs the same pre-flight the engine does at build time (parse +
@@ -242,11 +242,11 @@ and keeps the loop running.
 
 ```bash
 # Local engine — build the graph once, then ask in a loop (the `run` path reused)
-agentctl chat --config examples/agents.yml
-agentctl chat --config examples/agents.yml --stream      # token-by-token answers
+agentctl chat --config examples/enterprise-knowledge-assistant/agents.yaml
+agentctl chat --config examples/enterprise-knowledge-assistant/agents.yaml --stream   # token-by-token
 
 # Remote — drive a running `agentctl serve` over its /invoke and /stream HTTP API
-agentctl serve --config examples/agents.yml &
+agentctl serve --config examples/enterprise-knowledge-assistant/agents.yaml &
 agentctl chat --url http://localhost:8080
 agentctl chat --url http://localhost:8080 --stream
 ```
@@ -259,17 +259,18 @@ auth/user state is stored on the engine. `--env` (local mode) and the global
 the logs at your chosen level rather than the console. The session is shown as:
 
 ```
-You > List the invoices
-Agent > Here are the open invoices ...
+You > Which docs cover retries?
+Agent > The retry policy is documented in ...
 You > exit
 ```
 
 ## 7. Plugins and the extension model
 
-The engine contains **no** customer-specific authentication, authorization, or
-business-data lookup code. Customers provide Python plugins under a single
+The engine contains **no** client-specific authentication, authorization, or
+business-data lookup code. Developers provide Python plugins under a single
 package (`plugins/` — `hooks/`, `resolvers/`, `tools/`) described by one manifest,
-`plugins/plugins.toml`. See [examples/plugins/](examples/plugins/).
+`plugins/plugins.toml`. See
+[examples/enterprise-knowledge-assistant/plugins/](examples/enterprise-knowledge-assistant/plugins/).
 
 - **Resolver plugins** fill prompt variables before a node runs — generated as a
   `SharedResolver` plus per-agent `Resolver` subclasses, loaded by file path.
@@ -280,7 +281,7 @@ package (`plugins/` — `hooks/`, `resolvers/`, `tools/`) described by one manif
   [docs/RUNTIME_HOOKS.md](docs/RUNTIME_HOOKS.md).
 
 `agentctl generate` scaffolds the stubs and creates/updates `plugins.toml`.
-Package-path refs (e.g. `examples.plugins.hooks.mcp_auth:McpAuthHook`) are made
+Package-path refs (e.g. `plugins.hooks.research_hooks:ResearchHooksHook`) are made
 importable via `plugins.import_roots`, resolved relative to the spec file.
 
 ## 8. Runtime hooks and MCP auth
@@ -309,17 +310,13 @@ is discovered. By default the tags are sent as the header `X-MCP-Tool-Tag`;
 param). Filtering is **server-side** — only the discovered tools are bound, and
 nothing about tags is exposed to the LLM.
 
-To try all of this end-to-end without a public server, run the bundled local
-demo MCP server:
+The flagship example wires two remote MCP servers — a public one (DeepWiki) and
+an authenticated one (Context7) whose credential is injected per request by a
+`before_mcp_request` hook. Inspect the wiring offline:
 
 ```bash
-# terminal 1
-python -m examples.local_mcp_server.server         # Streamable HTTP on :8765/mcp
-# terminal 2
-agentctl run --config examples/local_mcp_agent_invoices.yml --message "List the invoices"
+agentctl inspect examples/enterprise-knowledge-assistant/agents.yaml
 ```
-
-See [examples/local_mcp_server/README.md](examples/local_mcp_server/README.md).
 
 ## 10. How prompts are rendered
 
@@ -340,7 +337,6 @@ agent.yml → YAML Loader → Validator → Compiler → CompiledAgentGraph
 
 **Key rule:** the runtime engine is created **once** at startup; per-request
 state lives in a `RunContext`, not on the engine. See
-[ADR 0001](docs/adr/0001-runtime-engine-created-once.md) and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## 12. For AI coding agents
@@ -364,7 +360,7 @@ python3 -m venv .venv && source .venv/bin/activate   # create + activate venv
 make install                                         # pip install -e ".[dev]"
 
 agentctl --help                                      # console script
-agentctl validate examples/agents.yml                # offline spec check
+agentctl validate examples/enterprise-knowledge-assistant/agents.yaml   # offline spec check
 make check                                           # lint + typecheck + test
 ```
 

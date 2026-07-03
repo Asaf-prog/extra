@@ -2,7 +2,7 @@
 
 Managed hooks (and any future import-path plugins) ultimately resolve to full
 Python import paths from ``plugins.toml``, e.g.
-``examples.plugins.hooks.mcp_auth:McpAuthHook``. Such refs only resolve if their
+``plugins.hooks.mcp_auth:McpAuthHook``. Such refs only resolve if their
 top-level package is on ``sys.path``. Relying on the shell's current working
 directory is fragile: launching the CLI from another directory breaks the
 import.

@@ -13,8 +13,7 @@ The runtime (0004) operates only on compiled, typed models — never raw YAML.
 This task bridges validated YAML to that model.
 
 **Read first:** `AGENTS.md`, `.ai/skills/runtime-engine.md`,
-`docs/ARCHITECTURE.md` (compiler + agent graph layers), `docs/YAML_SPEC.md`,
-`docs/adr/0002-yaml-is-compiled-not-executed-directly.md`.
+`docs/ARCHITECTURE.md` (compiler + agent graph layers), `docs/YAML_SPEC.md`.
 
 ## Scope
 
@@ -61,7 +60,7 @@ This task bridges validated YAML to that model.
 - [ ] All id references are resolved into direct links.
 - [ ] Effective model config is available per `AgentNode`.
 - [ ] The compiler input is the validated spec, not raw YAML.
-- [ ] Tests cover `examples/agents.yml`, reused node ids, and graph traversal.
+- [ ] Tests cover `examples/enterprise-knowledge-assistant/agents.yaml`, reused node ids, and graph traversal.
 - [ ] `make check` passes.
 
 ## Commands to run before finishing

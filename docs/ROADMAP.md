@@ -36,7 +36,7 @@ table above:
 
 | Capability | Status | Where |
 | ---------- | ------ | ----- |
-| Runtime hooks (auth/policy/audit/context-enrichment, incl. `transform_tool_result`) | ✅ done | `agent_engine/runtime/hooks/`, [ADR 0010](adr/0010-runtime-hooks.md), [RUNTIME_HOOKS.md](RUNTIME_HOOKS.md) |
+| Runtime hooks (auth/policy/audit/context-enrichment, incl. `transform_tool_result`) | ✅ done | `agent_engine/runtime/hooks/`, [RUNTIME_HOOKS.md](RUNTIME_HOOKS.md) |
 | Per-run execution-limit guardrails | ✅ done | `agent_engine/core/execution.py`, `agent_engine/runtime/execution.py`, [EXECUTION_LIMITS.md](EXECUTION_LIMITS.md) |
 | Amazon Bedrock model provider (in addition to Anthropic) | ✅ done | `agent_engine/models/factory.py` |
 | Conversation persistence (SQLite default, sessions, users) | ✅ done | `agent_manager/` |
@@ -45,18 +45,18 @@ table above:
 
 ## Open-source developer-experience milestones
 
-The platform is **self-hosted open source**. The bundled `examples/agents.yml`
+The platform is **self-hosted open source**. The bundled `examples/enterprise-knowledge-assistant/agents.yaml`
 demonstrates the product end-to-end. The CLI (**`agentctl`**) unlocks these
 milestones in order:
 
-| Milestone | Command (on `examples/agents.yml`) | Enabled by | Status |
+| Milestone | Command (on `examples/enterprise-knowledge-assistant/agents.yaml`) | Enabled by | Status |
 | --------- | ---------------------------------- | ---------- | ------ |
-| Validate  | `agentctl validate examples/agents.yml` | 0002 | ✅ done |
-| Inspect   | `agentctl inspect examples/agents.yml` | 0003 | ✅ done |
-| Generate  | `agentctl generate examples/agents.yml --mode all` | 0006 | ✅ done |
-| Run local | `agentctl run examples/agents.yml --message "hello"` | 0004–0006 | ✅ done |
-| Serve     | `agentctl serve examples/agents.yml` | 0009 | ✅ done |
-| Chat      | `agentctl chat examples/agents.yml` | 0004–0006 | ✅ done |
+| Validate  | `agentctl validate examples/enterprise-knowledge-assistant/agents.yaml` | 0002 | ✅ done |
+| Inspect   | `agentctl inspect examples/enterprise-knowledge-assistant/agents.yaml` | 0003 | ✅ done |
+| Generate  | `agentctl generate examples/enterprise-knowledge-assistant/agents.yaml --mode all` | 0006 | ✅ done |
+| Run local | `agentctl run examples/enterprise-knowledge-assistant/agents.yaml --message "hello"` | 0004–0006 | ✅ done |
+| Serve     | `agentctl serve examples/enterprise-knowledge-assistant/agents.yaml` | 0009 | ✅ done |
+| Chat      | `agentctl chat examples/enterprise-knowledge-assistant/agents.yaml` | 0004–0006 | ✅ done |
 
 All six commands work today. The graph-inspection command originally planned
 as `agentctl graph` shipped as `agentctl inspect` (an offline text summary,
@@ -151,5 +151,5 @@ passes, and the relevant documentation is consistent with the implementation.
 
 - Production-grade deployment topologies beyond a basic container.
 - A hosted control plane / UI.
-- Client-specific auth or business logic (this is the customer's plugin's job).
+- Client-specific auth or business logic (this belongs in client plugins).
 - Turning YAML into a general-purpose programming language.

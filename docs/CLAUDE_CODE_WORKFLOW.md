@@ -94,8 +94,8 @@ Adopt a role from `.ai/roles/` when the work matches it:
 ## 6. What not to do
 
 - **Do not build everything in one task.** Work task-by-task.
-- **Do not rewrite architecture casually.** Contract/architecture changes need an
-  ADR (use `.ai/skills/architecture-review.md`).
+- **Do not rewrite architecture casually.** Contract/architecture changes need
+  explicit approval (use `.ai/skills/architecture-review.md`).
 - **Do not skip tests.** Behavior ships with tests; mock external systems.
 - **Do not hardcode secrets** in code, YAML, prompts, or `.claude/` config.
 - **Do not edit generated adapters** in `.claude/` or any tool folder. Keep

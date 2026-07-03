@@ -1,6 +1,6 @@
 """Per-run context propagation for hooks.
 
-The engine is created once and shared across requests (ADR 0001), so it must
+The engine is created once and shared across requests, so it must
 hold no request state. The current run's :class:`RunContext` is instead carried
 in a :class:`contextvars.ContextVar`, which is copied into any task/coroutine
 spawned during the run. This lets the MCP transport auth layer and tool-call
