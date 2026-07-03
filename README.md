@@ -139,6 +139,42 @@ graph:
     domestic_flights_agent:
 ```
 
+### Flagship example: Enterprise Knowledge Assistant
+
+[`examples/enterprise-knowledge-assistant/`](examples/enterprise-knowledge-assistant/)
+is the reference system for this project — the example to read first to
+understand what EXTRA actually builds. It is a multi-agent research and
+documentation assistant with:
+
+- a **root orchestrator** (`research_router`) that routes into two
+  **nested sub-orchestrators** (`knowledge_router`, `analysis_router`);
+- **two remote MCP servers** — a public one (DeepWiki) and an **authenticated**
+  one (Context7), whose credentials are injected per request by a
+  `before_mcp_request` hook, never stored in YAML;
+- a **protected agent** (`enterprise_docs_agent`) gated by the access plugin;
+- **local business tools** (`generate_decision_matrix`, `build_learning_plan`)
+  whose implementation is left to the application developer;
+- **shared and agent-scoped resolvers**, a **per-node model override**, and
+  five **runtime hooks** (startup validation, MCP auth, tool-call auditing,
+  tool-result truncation, and run-error recording).
+
+The YAML declares the system; only the plugin code under
+[`examples/enterprise-knowledge-assistant/plugins/`](examples/enterprise-knowledge-assistant/plugins/)
+is user-implemented. Everything else — validation, compilation, routing,
+prompt rendering, and execution — is handled by the engine.
+
+```bash
+# Offline — no network, no LLM calls, no secrets required
+agentctl validate examples/enterprise-knowledge-assistant/agents.yaml
+agentctl inspect  examples/enterprise-knowledge-assistant/agents.yaml
+
+# Live — copy .env.example to .env and fill in your keys first
+cp examples/enterprise-knowledge-assistant/.env.example examples/enterprise-knowledge-assistant/.env
+agentctl run --config examples/enterprise-knowledge-assistant/agents.yaml \
+  --env examples/enterprise-knowledge-assistant/.env \
+  --message "Compare LangGraph and Temporal for building a research agent."
+```
+
 ## 6. CLI commands
 
 The console script is **`agentctl`** (run `agentctl --help`). A global
@@ -150,17 +186,34 @@ The console script is **`agentctl`** (run `agentctl --help`). A global
 | `inspect`  | `agentctl inspect <spec.yml>` | Offline summary of agents/MCPs/hooks/plugins/tags |
 | `generate` | `agentctl generate --config <spec.yml>` | Create resolver/tool/hook stubs + `plugins.toml` |
 | `run`      | `agentctl run --config <spec.yml> --message "..."` | Run one message (`--stream`, `--env`); persists to SQLite via `agent_manager` |
-| `serve`    | `agentctl serve --config <spec.yml>` | **Stateless** engine HTTP API — `/invoke`, `/stream`, no persistence, no widget (`--host`, `--port`, default port `8080`, `--env`) |
+| `serve`    | `agentctl serve --config <spec.yml>` | **Stateless** engine HTTP API — `/invoke`, `/stream`, no persistence, no web client (`--host`, `--port`, default port `8080`, `--env`) |
 | `chat`     | `agentctl chat --config <spec.yml>` | Ephemeral developer console; reuse one engine across questions, nothing is persisted (`--stream`, `--env`, `--url`) |
 
 `serve` and `chat` are developer/embedding tools, not the conversation product. For
-a persisted, multi-turn HTTP API with SSE streaming and the embeddable chat
-widget, run the separate **`agent-manager`** console script instead (default
+a persisted, multi-turn HTTP API with SSE streaming and the **official React web
+client**, run the separate **`agent-manager`** console script instead (default
 port `8100`; see [`docs/WIDGET.md`](docs/WIDGET.md)):
 
 ```bash
 agent-manager --config examples/agents.yml --port 8100
 ```
+
+### Engine API vs. Agent Manager API
+
+Two HTTP tiers exist, and the difference matters:
+
+- **Engine API** (`agentctl serve`, `/invoke` + `/stream`) — **stateless**. Each
+  request is handled independently by the `agent_engine` package; nothing about
+  prior turns is remembered between calls.
+- **Agent Manager API** (`agent-manager`, `/conversations` + SSE streaming) —
+  **conversation-aware**. Built on top of the Engine API by the `agent_manager`
+  package, it persists conversation/message history (SQLite by default) and
+  assembles prior turns as context on each new message. This is also what
+  serves the official React web client.
+
+`agent_engine` never imports `agent_manager` — the dependency only goes one way,
+through the `Engine` / `RunResult` port (see
+[ADR 0003](docs/adr/0003-client-specific-logic-lives-in-sidecar.md)).
 
 `validate` and `inspect` are **fully offline** — no LLM calls, no MCP network,
 no tool execution:
