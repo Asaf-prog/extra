@@ -21,7 +21,10 @@ settings = Settings()
 config.set_main_option("sqlalchemy.url", settings.effective_database_url)
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Do not silence already-configured application loggers when a migration
+    # runs (Alembic's default disable_existing_loggers=True would disable e.g.
+    # ``agent_engine.trace``).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = SQLModel.metadata
 
