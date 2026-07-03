@@ -50,9 +50,3 @@ def mount_web(app: FastAPI, settings: Settings) -> None:
         return FileResponse(
             STATIC_DIR / "widget-demo-attribute-override.html", media_type="text/html"
         )
-
-    @app.get("/widget-agent-flow-demo.html")
-    def widget_agent_flow_demo() -> FileResponse:
-        return FileResponse(
-            STATIC_DIR / "widget-agent-flow-demo.html", media_type="text/html"
-        )

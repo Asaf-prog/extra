@@ -217,14 +217,3 @@ def test_generate_is_idempotent_and_preserves_manifest(tmp_path: Path) -> None:
 
     assert manifest.read_text() == snapshot  # no churn
     assert MANIFEST_NAME in result.skipped  # existed, not recreated
-
-
-def test_bundled_examples_manifest_is_consistent() -> None:
-    # The committed examples/plugins/plugins.toml is valid and lists the package.
-    manifest = Path(__file__).resolve().parents[2] / "examples" / "plugins" / "plugins.toml"
-    data = _read(manifest)
-    assert data["package"]["name"] == "examples.plugins"
-    assert data["tools"]["book_flight"] == "examples.plugins.tools.book_flight:book_flight"
-    assert data["resolvers"]["shared"] == "examples.plugins.resolvers.shared:SharedResolver"
-    assert data["hooks"]["before_mcp_request"] == []
-    assert data["hooks"]["plugins"]["mcp_auth"] == "examples.plugins.hooks.mcp_auth:McpAuthHook"

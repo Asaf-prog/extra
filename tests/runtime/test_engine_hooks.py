@@ -246,10 +246,12 @@ async def test_stream_before_build_error_mentions_engine_lifecycle(
             pass
 
 
-async def test_public_no_hook_examples_build_without_mcp_hook_auth(
-    monkeypatch: pytest.MonkeyPatch, model_factory: Any
+async def test_no_hook_spec_builds_without_mcp_hook_auth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model_factory: Any
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[2]
+    # A spec with an MCP server but no hooks must build with no auth injected
+    # into the MCP client config (auth is only ever added by a before_mcp_request
+    # hook, which this spec does not declare).
     captured_configs: list[dict[str, Any]] = []
 
     class FakeMultiServerMCPClient:
@@ -264,14 +266,20 @@ async def test_public_no_hook_examples_build_without_mcp_hook_auth(
         FakeMultiServerMCPClient,
     )
 
-    for relative in ("examples/agents.yml", "examples/deepwiki_mcp_agents.yml"):
-        config_path = repo_root / relative
-        spec = YAMLParser().parse(str(config_path))
-        assert spec.hooks.hooks == ()
-        async with LangGraphEngine(config_path.parent, model_factory=model_factory) as engine:
-            await engine.build(spec)
-            assert engine._hook_manager is not None
-            assert engine._hook_manager.hook_count == 0
+    config_path = tmp_path / "agents.yml"
+    config_path.write_text(
+        "system: {name: no-hooks}\n"
+        "agents: {researcher: {description: d, mcps: [remote]}}\n"
+        "graph: {researcher: }\n"
+        "mcps: {remote: {url: 'https://mcp.example.com/mcp'}}\n",
+        encoding="utf-8",
+    )
+    spec = YAMLParser().parse(str(config_path))
+    assert spec.hooks.hooks == ()
+    async with LangGraphEngine(config_path.parent, model_factory=model_factory) as engine:
+        await engine.build(spec)
+        assert engine._hook_manager is not None
+        assert engine._hook_manager.hook_count == 0
 
     assert captured_configs
     assert all("auth" not in config for config in captured_configs)

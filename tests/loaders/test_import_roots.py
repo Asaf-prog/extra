@@ -219,12 +219,3 @@ async def test_engine_build_without_roots_is_unchanged(tmp_path: Path, _restore_
     engine = LangGraphEngine(tmp_path, model_factory=_model_factory)  # type: ignore[arg-type]
     await engine.build(spec)
     assert sys.path == before
-
-
-# -- bundled example ---------------------------------------------------------
-
-
-def test_bundled_example_declares_import_root() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    spec = YAMLParser().parse(str(repo_root / "examples" / "hooks_mcp_auth_agents.yml"))
-    assert spec.plugins.import_roots == ("..",)

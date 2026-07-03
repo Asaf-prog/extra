@@ -48,17 +48,17 @@ def test_unknown_conversation_returns_404(client: TestClient) -> None:
 class _SubAgentEngine(Engine):
     """Stub that mimics a parent orchestrator routing to a sub-agent.
 
-    Mirrors what the real widget_sub_agent_demo config produces: the route
-    visits the root orchestrator and then a sub-agent path. Lets us assert the
-    real conversation API surfaces sub-agent participation without an LLM.
+    The route visits the root orchestrator and then a sub-agent path. Lets us
+    assert the real conversation API surfaces sub-agent participation without an
+    LLM.
     """
 
     async def build(self, _spec: object) -> None: ...
 
     async def run(self, message: str, *, context: RunContext | None = None) -> RunResult:
         return RunResult(
-            system_name="Widget Sub-Agent Demo",
-            visited=["concierge_router", "concierge_router/tags_agent"],
+            system_name="Knowledge Assistant",
+            visited=["knowledge_router", "knowledge_router/documentation_agent"],
             answer="The available document tags are: finance, legal, hr.",
         )
 
@@ -93,7 +93,7 @@ def test_send_surfaces_sub_agent_in_visited_without_mocking() -> None:
     cid = client.post("/conversations").json()["conversation_id"]
     body = client.post(f"/conversations/{cid}/messages", json={"message": "tags?"}).json()
 
-    assert body["visited"] == ["concierge_router", "concierge_router/tags_agent"]
+    assert body["visited"] == ["knowledge_router", "knowledge_router/documentation_agent"]
     assert any("/" in hop for hop in body["visited"]), "expected a sub-agent hop"
     assert "finance" in body["answer"]
 

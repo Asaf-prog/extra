@@ -38,7 +38,6 @@ def test_demo_page_served_as_html(client: TestClient) -> None:
         "/widget-demo-inline.html",
         "/widget-demo-automount.html",
         "/widget-demo-attribute-override.html",
-        "/widget-agent-flow-demo.html",
     ],
 )
 def test_widget_demo_pages_served_as_html(client: TestClient, path: str) -> None:
@@ -46,14 +45,6 @@ def test_widget_demo_pages_served_as_html(client: TestClient, path: str) -> None
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     assert "/widget.js" in r.text
-
-
-def test_agent_flow_demo_page_listens_for_routing_metadata(client: TestClient) -> None:
-    # The real-flow demo page must wire up the agent-chat:answer event so the
-    # sub-agent routing path is shown without mocking anything.
-    r = client.get("/widget-agent-flow-demo.html")
-    assert "agent-chat:answer" in r.text
-    assert "widget_sub_agent_demo.yml" in r.text
 
 
 def test_cors_denied_by_default(client: TestClient) -> None:

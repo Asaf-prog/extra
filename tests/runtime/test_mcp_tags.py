@@ -25,7 +25,6 @@ from agent_engine.core.spec import (
     SystemSpec,
 )
 from agent_engine.engine.langgraph.engine import LangGraphEngine
-from agent_engine.engine.langgraph.helpers import collect_mcp_specs
 from agent_engine.loaders.mcp_tags import (
     DEFAULT_TOOL_TAG_HEADER,
     McpToolTagError,
@@ -49,30 +48,30 @@ def test_apply_no_tags_is_noop() -> None:
 def test_apply_header_transport() -> None:
     config = apply_tool_tags(
         {"url": "https://x/mcp"},
-        ("invoices", "customers"),
+        ("policies", "architecture"),
         McpToolTagTransport("header", header_name="X-MCP-Tool-Tag"),
     )
-    assert config["headers"] == {"X-MCP-Tool-Tag": "invoices,customers"}
+    assert config["headers"] == {"X-MCP-Tool-Tag": "policies,architecture"}
     assert config["url"] == "https://x/mcp"  # url untouched for header transport
 
 
 def test_apply_query_param_preserves_existing_query() -> None:
     config = apply_tool_tags(
         {"url": "https://x/mcp?foo=1"},
-        ("invoices",),
+        ("policies",),
         McpToolTagTransport("query_param", param_name="tag"),
     )
-    assert config["url"] == "https://x/mcp?foo=1&tag=invoices"
+    assert config["url"] == "https://x/mcp?foo=1&tag=policies"
 
 
 def test_apply_tags_without_transport_uses_default_header() -> None:
-    config = apply_tool_tags({"url": "https://x/mcp"}, ("invoices",), None, server_id="bc")
-    assert config["headers"] == {DEFAULT_TOOL_TAG_HEADER: "invoices"}
+    config = apply_tool_tags({"url": "https://x/mcp"}, ("policies",), None, server_id="bc")
+    assert config["headers"] == {DEFAULT_TOOL_TAG_HEADER: "policies"}
 
 
 def test_apply_multiple_tags_without_transport_comma_joined() -> None:
-    config = apply_tool_tags({"url": "https://x/mcp"}, ("invoices", "customers"), None)
-    assert config["headers"] == {DEFAULT_TOOL_TAG_HEADER: "invoices,customers"}
+    config = apply_tool_tags({"url": "https://x/mcp"}, ("policies", "architecture"), None)
+    assert config["headers"] == {DEFAULT_TOOL_TAG_HEADER: "policies,architecture"}
 
 
 def test_default_header_constant() -> None:
@@ -81,7 +80,7 @@ def test_default_header_constant() -> None:
 
 def test_apply_unknown_transport_type_raises() -> None:
     with pytest.raises(McpToolTagError):
-        apply_tool_tags({"url": "u"}, ("invoices",), McpToolTagTransport("cookie"))
+        apply_tool_tags({"url": "u"}, ("policies",), McpToolTagTransport("cookie"))
 
 
 # -- parser / schema ---------------------------------------------------------
@@ -111,10 +110,10 @@ def test_parse_no_tool_tags() -> None:
 
 def test_parse_one_tag() -> None:
     spec = _parse(
-        "  bc:\n    url: https://x/mcp\n    tool_tags: [invoices]\n"
+        "  bc:\n    url: https://x/mcp\n    tool_tags: [policies]\n"
         "    tool_tag_transport: {type: header, header_name: X-MCP-Tool-Tag}\n"
     )
-    assert _mcp(spec).tool_tags == ("invoices",)
+    assert _mcp(spec).tool_tags == ("policies",)
     assert _mcp(spec).tool_tag_transport == McpToolTagTransport(
         "header", header_name="X-MCP-Tool-Tag"
     )
@@ -123,10 +122,10 @@ def test_parse_one_tag() -> None:
 def test_parse_multiple_tags_deduped_in_order() -> None:
     spec = _parse(
         "  bc:\n    url: https://x/mcp\n"
-        "    tool_tags: [invoices, customers, invoices]\n"
+        "    tool_tags: [policies, architecture, policies]\n"
         "    tool_tag_transport: {type: query_param, param_name: tag}\n"
     )
-    assert _mcp(spec).tool_tags == ("invoices", "customers")
+    assert _mcp(spec).tool_tags == ("policies", "architecture")
 
 
 def test_empty_tags_behaves_like_no_tags() -> None:
@@ -136,8 +135,8 @@ def test_empty_tags_behaves_like_no_tags() -> None:
 
 def test_tags_without_transport_parse_successfully() -> None:
     # The common case: no tool_tag_transport needed (default header applies).
-    spec = _parse("  bc:\n    url: https://x/mcp\n    tool_tags: [invoices, customers]\n")
-    assert _mcp(spec).tool_tags == ("invoices", "customers")
+    spec = _parse("  bc:\n    url: https://x/mcp\n    tool_tags: [policies, architecture]\n")
+    assert _mcp(spec).tool_tags == ("policies", "architecture")
     assert _mcp(spec).tool_tag_transport is None
     # The resolved transport is the default header.
     transport = effective_tool_tag_transport(_mcp(spec))
@@ -156,26 +155,19 @@ def test_tags_without_transport_parse_successfully() -> None:
         "  bc:\n    url: https://x/mcp\n    tool_tags: [123]\n"
         "    tool_tag_transport: {type: header, header_name: X}\n",
         # unknown transport type
-        "  bc:\n    url: https://x/mcp\n    tool_tags: [invoices]\n"
+        "  bc:\n    url: https://x/mcp\n    tool_tags: [policies]\n"
         "    tool_tag_transport: {type: cookie}\n",
         # header transport missing header_name
-        "  bc:\n    url: https://x/mcp\n    tool_tags: [invoices]\n"
+        "  bc:\n    url: https://x/mcp\n    tool_tags: [policies]\n"
         "    tool_tag_transport: {type: header}\n",
         # tool_tags not a list
-        "  bc:\n    url: https://x/mcp\n    tool_tags: invoices\n",
+        "  bc:\n    url: https://x/mcp\n    tool_tags: policies\n",
     ],
 )
 def test_invalid_tool_tags_fail_clearly(body: str) -> None:
     with pytest.raises(ParseError) as exc:
         _parse(body)
     assert "tool_tag" in str(exc.value)
-
-
-def test_public_deepwiki_example_still_parses() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    spec = YAMLParser().parse(str(repo_root / "examples" / "deepwiki_mcp_agents.yml"))
-    deepwiki = next(iter(collect_mcp_specs(spec.graph).values()))
-    assert deepwiki.tool_tags == ()  # no tags -> unchanged
 
 
 # -- engine discovery wiring -------------------------------------------------
@@ -235,7 +227,7 @@ async def test_header_tags_applied_only_to_tagged_server(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, dict[str, Any]] = {}
-    tool = StructuredTool.from_function(lambda message: "ok", name="invoice_tool", description="d")
+    tool = StructuredTool.from_function(lambda message: "ok", name="policy_tool", description="d")
     monkeypatch.setattr(
         "langchain_mcp_adapters.client.MultiServerMCPClient",
         _capturing_client(captured, {"bc": [tool], "plain": []}),
@@ -244,7 +236,7 @@ async def test_header_tags_applied_only_to_tagged_server(
         MCPSpec(
             id="bc",
             url="https://x/mcp",
-            tool_tags=("invoices",),
+            tool_tags=("policies",),
             tool_tag_transport=McpToolTagTransport("header", header_name="X-MCP-Tool-Tag"),
         ),
         MCPSpec(id="plain", url="https://y/mcp"),
@@ -252,10 +244,10 @@ async def test_header_tags_applied_only_to_tagged_server(
     async with LangGraphEngine(Path("."), model_factory=_model_factory) as engine:
         await engine.build(spec)
         # Only the tagged server gets the tag header.
-        assert captured["bc"]["headers"] == {"X-MCP-Tool-Tag": "invoices"}
+        assert captured["bc"]["headers"] == {"X-MCP-Tool-Tag": "policies"}
         assert "headers" not in captured["plain"]
         # Only the tools discovered for the tagged server are bound.
-        assert [t.name for t in engine._mcp_tools["bc"]] == ["invoice_tool"]
+        assert [t.name for t in engine._mcp_tools["bc"]] == ["policy_tool"]
         assert engine._mcp_tools["plain"] == []
 
 
@@ -269,13 +261,13 @@ async def test_query_param_tags_applied(monkeypatch: pytest.MonkeyPatch) -> None
         MCPSpec(
             id="bc",
             url="https://x/mcp",
-            tool_tags=("invoices", "customers"),
+            tool_tags=("policies", "architecture"),
             tool_tag_transport=McpToolTagTransport("query_param", param_name="tag"),
         )
     )
     async with LangGraphEngine(Path("."), model_factory=_model_factory) as engine:
         await engine.build(spec)
-    assert captured["bc"]["url"] == "https://x/mcp?tag=invoices%2Ccustomers"
+    assert captured["bc"]["url"] == "https://x/mcp?tag=policies%2Carchitecture"
 
 
 async def test_tags_without_transport_apply_default_header_at_build(
@@ -287,7 +279,7 @@ async def test_tags_without_transport_apply_default_header_at_build(
         _capturing_client(captured, {"bc": []}),
     )
     # No tool_tag_transport -> the default header transport is applied at build.
-    spec = _agent_with_mcps(MCPSpec(id="bc", url="https://x/mcp", tool_tags=("invoices",)))
+    spec = _agent_with_mcps(MCPSpec(id="bc", url="https://x/mcp", tool_tags=("policies",)))
     async with LangGraphEngine(Path("."), model_factory=_model_factory) as engine:
         await engine.build(spec)
-    assert captured["bc"]["headers"] == {DEFAULT_TOOL_TAG_HEADER: "invoices"}
+    assert captured["bc"]["headers"] == {DEFAULT_TOOL_TAG_HEADER: "policies"}

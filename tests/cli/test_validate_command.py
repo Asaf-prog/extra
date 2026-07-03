@@ -43,34 +43,15 @@ def _write(tmp_path: Path, body: str) -> str:
 # -- passing examples --------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "deepwiki_mcp_agents.yml",
-        "local_mcp_agent.yml",
-        "local_mcp_agent_invoices.yml",
-        "local_mcp_agent_customers.yml",
-        "local_mcp_agent_docs_query.yml",
-        "hooks_mcp_auth_agents.yml",
-        "agents.yml",
-    ],
-)
-def test_validate_passes_on_examples(name: str) -> None:
-    result = validate_spec(_ex(name))
+def test_validate_reports_tool_tags(tmp_path: Path) -> None:
+    spec = _write(
+        tmp_path,
+        "system: {name: t}\nagents: {a: {description: d, mcps: [bc]}}\ngraph: {a: }\n"
+        "mcps: {bc: {url: 'https://x/mcp', tool_tags: ['policies']}}\n",
+    )
+    result = validate_spec(spec)
     assert result.ok, result.errors
-
-
-def test_validate_reports_tool_tags() -> None:
-    result = validate_spec(_ex("local_mcp_agent_invoices.yml"))
-    assert result.ok
-    assert result.tool_tags == {"local_demo": ("invoices",)}
-
-
-def test_validate_counts_hooks_for_hook_example() -> None:
-    result = validate_spec(_ex("hooks_mcp_auth_agents.yml"))
-    assert result.ok
-    assert result.hooks == 5
-    assert result.import_roots  # ".." resolved
+    assert result.tool_tags == {"bc": ("policies",)}
 
 
 def test_validate_passes_on_enterprise_knowledge_assistant_demo() -> None:
@@ -89,6 +70,7 @@ def test_validate_passes_on_enterprise_knowledge_assistant_demo() -> None:
     assert result.agents == 5
     assert result.mcp_servers == 2
     assert result.hooks == 5
+    assert result.import_roots  # "." resolved relative to the spec file
 
 
 def test_no_hook_spec_does_not_require_plugins_toml(tmp_path: Path) -> None:
@@ -224,7 +206,10 @@ def test_validate_fails_on_missing_file() -> None:
 
 def test_cli_validate_exit_zero() -> None:
     runner = CliRunner()
-    res = runner.invoke(cli, ["--log-level", "WARNING", "validate", _ex("local_mcp_agent.yml")])
+    res = runner.invoke(
+        cli,
+        ["--log-level", "WARNING", "validate", _ex("enterprise-knowledge-assistant/agents.yaml")],
+    )
     assert res.exit_code == 0
     assert "validation passed" in res.output
 
