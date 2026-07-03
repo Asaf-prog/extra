@@ -192,10 +192,6 @@
           "minLength": 1,
           "description": "Method on the managed hook plugin class."
         },
-        "config": {
-          "type": "object",
-          "description": "Per-hook invocation config. Store env-var names here, not raw secrets."
-        },
         "failure_policy": {
           "type": "string",
           "enum": ["fail", "warn"],
