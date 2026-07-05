@@ -1,77 +1,98 @@
 ---
 title: Introduction
-description: A declarative Python engine for hierarchical multi-agent systems.
+description: Extra — an agent engine for hierarchical multi-agent systems.
 ---
 
-## What is Agent Engine?
+## What is Extra?
 
-Agent Engine is an open-source platform for building and running AI agent systems declaratively.
+Extra is an open-source platform for building and running AI agent systems declaratively.
+You describe your agents, orchestrators, tools, MCP servers, and their connections in a YAML file. Extra validates, compiles, and runs that system — without you writing plumbing code.
 
-You describe your agents, orchestrators, tools, MCP servers, and their connections in a YAML file.
-The engine validates, compiles, and runs that system — without you writing plumbing code.
+Because each agent is strictly scoped to its own domain — with its own tools, prompts, and data sources — the system produces accurate, grounded responses with no hallucination bleeding between domains. One spec file can orchestrate agents across any number of domains, all routing correctly with no coordination code.
+
+---
+
+## Why Extra?
+
+Most agent frameworks give you primitives and leave the hard parts to you: routing logic, prompt wiring, tool access control, auth, and tracing — all written by hand, every time.
+
+Extra moves that into a reusable runtime. You declare what your system is. Extra handles how it runs.
+
+---
+
+## From spec to production
 
 ```yaml
-system:
-  name: "My AI System"
-
 orchestrators:
   router:
-    description: "Routes user requests."
+    description: "Routes customer requests to the right department."
     prompts:
       orchestrator: "prompts/router.md"
 
 agents:
-  support_agent:
-    description: "Handles support questions."
-    prompts:
-      system: "prompts/support.md"
-    mcps: [helpdesk]
+  orders_agent:
+    description: "Handles order status and tracking."
+    tools: [get_order_status]
+    mcps: [orders_api]
+
+  returns_agent:
+    description: "Handles return requests and refunds."
+    tools: [create_return]
 
 graph:
   router:
-    support_agent:
+    orders_agent:
+    returns_agent:
 ```
 
-## Why Agent Engine?
+That's your entire system. Extra generates the plugin stubs — you fill in the business logic. We validate, compile, and run it. Production-ready.
 
-Building multi-agent systems by hand means re-implementing the same plumbing every time:
-prompt rendering, agent routing, tool wiring, MCP auth, and tracing.
+<Steps>
+  <Step title="Write your spec">
+    Declare agents, tools, and connections in YAML.
+  </Step>
+  <Step title="Generate">
+    Run `generate` via Docker — Extra creates the plugin stubs from your spec. Fill them in with your business logic.
+  </Step>
+  <Step title="Fill in your logic">
+    Implement the stubs — your APIs, your data, your auth.
+  </Step>
+  <Step title="Run">
+    Extra validates, compiles, and serves. Done.
+  </Step>
+</Steps>
 
-Agent Engine moves that plumbing into a reusable runtime so you focus on **what** your system does,
-not **how** it runs.
+---
+
+## Key benefits
 
 <CardGroup cols={2}>
-  <Card title="Declarative" icon="file-code">
-    Define agents, tools, and topology in YAML. No framework boilerplate.
+  <Card title="No coordination code" icon="file-code">
+    Define agents and their connections in YAML. Extra handles routing, scoping, and execution.
   </Card>
-  <Card title="LangGraph Runtime" icon="diagram-project">
-    Orchestrators run as supervisors. Children are exposed to the LLM as tools.
+  <Card title="Domain isolation" icon="shield">
+    Each agent is scoped to its domain. No hallucination bleeds between agents.
   </Card>
-  <Card title="MCP Native" icon="plug">
-    Connect remote MCP servers by URL. Tools are discovered at build time.
+  <Card title="Any data source" icon="plug">
+    Connect agents to remote MCP servers, local tools, or your own APIs — in any language.
   </Card>
-  <Card title="Embeddable Widget" icon="message-bot">
-    Drop a `<agent-chat>` element into any web app. No framework required.
+  <Card title="Lifecycle hooks" icon="diagram-project" href="/docs/runtime-hooks">
+    Run trusted Python at fixed runtime points — MCP auth, env validation, auditing — without touching the engine.
+  </Card>
+  <Card title="Drop-in widget" icon="message-bot">
+    Embed a full chat interface into any web app with a single HTML tag.
   </Card>
 </CardGroup>
 
-## Key Features
-
-- **YAML-first** — orchestrators, agents, prompts, resolvers, tools, and graph topology in one file
-- **Runtime hooks** — trusted lifecycle code for auth, policy, and audit — never seen by the LLM
-- **MCP auth** — `before_mcp_request` hooks inject headers per request; tokens never reach the model
-- **Conversation persistence** — `agent_manager` layer with SQLite/Postgres and SSE streaming
-- **Embeddable widget** — Shadow DOM-isolated `<agent-chat>` custom element
-- **Observability** — pluggable LangChain callbacks; Langfuse tracing auto-enables via env vars
-- **Docker-ready** — official image, defaults to `serve` mode
+---
 
 ## Next Steps
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="/docs/quickstart">
-    Install and run your first agent in 5 minutes.
+    Run your first agent in 5 minutes.
   </Card>
   <Card title="Architecture" icon="building" href="/docs/architecture">
-    Understand the layers and request flow.
+    Understand how Extra routes and executes requests.
   </Card>
 </CardGroup>

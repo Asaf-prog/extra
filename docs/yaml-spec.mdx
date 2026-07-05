@@ -3,57 +3,40 @@ title: YAML Reference
 description: Every field you can declare in agents.yml, with examples across different domains.
 ---
 
-## Overview
+## What this file does
 
-A spec file has two conceptual halves:
+`agents.yml` defines your entire agent system: every agent, what it can do, and how requests route between them. Extra validates it and compiles it into a running system.
 
-- **Declarations** — what exists: agents, orchestrators, tools, MCP servers, resolvers, hooks.
-- **Graph** — how they connect at runtime. Indentation is the topology.
+You still write the prompt files it references and implement any tools or resolvers you declare — the YAML alone isn't the whole system.
 
-The engine validates and compiles the YAML before any request runs. It never executes YAML content directly.
+Every top-level key, in the order you'd typically write them:
 
-```yaml
-# Everything you declare...
-system: ...
-defaults: ...
-mcps: ...
-tools: ...
-resolvers: ...
-orchestrators: ...
-agents: ...
-hooks: ...
+| Key | Required | What it declares |
+|-----|----------|-------------------|
+| [`system`](#system) | Yes | Name and metadata for this system |
+| [`defaults`](#defaults) | No | The default model, used unless a node overrides it |
+| [`tools`](#tools) | No | Python functions agents can call |
+| [`mcps`](#mcps) | No | Remote MCP servers agents can call |
+| [`resolvers`](#resolvers) | No | Values auto-filled into prompts before an agent runs |
+| [`orchestrators`](#orchestrators) | See note below | Routers that decide which agent handles a request |
+| [`agents`](#agents) | See note below | Executors that run an LLM and can call tools |
+| [`hooks`](#hooks) | No | Trusted code that runs at fixed points — auth, audit |
+| [`plugins`](#plugins) | No | Where Extra finds your plugin code |
+| [`graph`](#graph) | Yes | How everything above connects — the routing topology |
 
-# ...and how it connects
-graph:
-  root_orchestrator:
-    child_agent_a:
-    child_agent_b:
-```
+<Note>
+  `orchestrators` and `agents` are each individually optional, but `graph` must have a root, and that root has to be declared in one of them. In practice: a single-agent system needs only `agents`; anything routing between multiple agents needs at least one orchestrator too.
+</Note>
 
----
+Extra validates the whole file before running anything — bad references, missing prompt files, or broken graph structure fail immediately with a clear error, not at request time.
 
-## Running example
-
-All examples on this page build toward a customer support bot for an online store.
-It routes users to the right department, each with its own tools and data sources.
-
-<Frame>
-```
-User message
-     │
-     ▼
-  router          ← orchestrator: decides where to send the request
-  ├── orders_agent     ← handles order status, tracking
-  ├── returns_agent    ← handles refunds and returns
-  └── catalog_agent    ← handles product questions
-```
-</Frame>
+Every example below builds toward one running system: a customer support bot for an online store, with separate agents for orders, returns, and catalog questions.
 
 ---
 
 ## `system`
 
-Metadata about your system. Currently used for display and tracing.
+Identifies the system. Shows up in logs, traces, and the CLI — this is how you tell your systems apart once you're running more than one.
 
 ```yaml
 system:
@@ -62,13 +45,13 @@ system:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | yes | Human-readable name shown in logs and traces. |
+| `name` | Yes | Display name shown in logs and traces. |
 
 ---
 
 ## `defaults`
 
-Default model for every agent and orchestrator. Can be overridden per node.
+The model every agent and orchestrator uses unless it overrides its own.
 
 ```yaml
 defaults:
@@ -79,7 +62,7 @@ defaults:
 ```
 
 <Tip>
-  Set a cheap/fast model as the default (e.g. Haiku) and override to a stronger one only for agents that need it. Orchestrators doing only routing work well with a fast model.
+  Set a fast, cheap model as the default (e.g. Haiku) and override to a stronger model only where it matters. Orchestrators that just route work well with a fast model — save the strong model for agents doing real reasoning.
 </Tip>
 
 ### Supported providers
@@ -101,17 +84,177 @@ model:
 ```
 </CodeGroup>
 
-For Bedrock, `region` can be omitted if `AWS_REGION` or `AWS_DEFAULT_REGION` is set. AWS credentials follow the standard chain (`AWS_PROFILE`, `AWS_ACCESS_KEY_ID`, IAM roles, etc.).
+For Bedrock, `region` can be omitted if `AWS_REGION` or `AWS_DEFAULT_REGION` is set. Credentials follow the standard AWS chain — profile, environment variables, or an IAM role.
 
 <Warning>
-  Never put API keys or secrets in YAML. Use environment variables — the engine reads them at runtime.
+  A node-level `model` is a **full replacement**, not a merge with `defaults.model`. If you override the model on an agent, specify every field — `provider`, `name`, and any others you need. Partial overrides won't inherit missing fields from `defaults`.
 </Warning>
+
+<Warning>
+  Never put API keys in YAML. Extra reads provider credentials from environment variables at runtime.
+</Warning>
+
+---
+
+## `tools`
+
+A tool is a Python function an agent can choose to call. You describe what it does; Extra generates the stub; you write the logic.
+
+```yaml
+tools:
+  get_order_status:
+    description: "Get the current status and tracking info for an order by order ID."
+
+  cancel_order:
+    description: "Cancel an order that hasn't shipped. Requires order ID and reason."
+
+  create_return_request:
+    description: "Open a return request for a delivered order. Requires order ID and reason."
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `description` | Yes | What the model reads to decide whether to call this tool. |
+
+<Tip>
+  The description is the model's *only* signal for choosing a tool. Write it like you're briefing a new team member — clear inputs, clear purpose. "Get order status by order ID" beats "order_status_getter" every time.
+</Tip>
+
+`generate` creates one stub file per tool (see [Quickstart](/docs/quickstart)). You fill in the real implementation:
+
+```python plugins/tools/get_order_status.py
+def get_order_status(order_id: str) -> dict:
+    """Get the current status and tracking info for an order by order ID."""
+    return {
+        "status": "shipped",
+        "tracking_number": "1Z999AA10123456784",
+        "estimated_delivery": "2026-07-05",
+    }
+```
+
+Give an agent access by adding the tool id to its `tools` list — see [`agents`](#agents) below.
+
+---
+
+## `mcps`
+
+MCP servers are remote tool providers you connect by URL. Extra discovers their tools automatically at startup — you never write MCP client code.
+
+```yaml
+mcps:
+  orders_mcp:
+    url: "https://api.acme.com/mcp"
+
+  catalog_mcp:
+    url: "https://catalog.acme.com/mcp"
+    tool_tags: ["public"]        # only discover tools tagged "public"
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `url` | Yes | The MCP server's Streamable HTTP endpoint. |
+| `tool_tags` | No | Only discover tools carrying this tag. |
+| `tool_tag_transport` | No | How the tag is sent — see below. |
+
+Grant an agent access the same way as any tool — by id, in the agent's `mcps` list.
+
+### Tool tags
+
+If your MCP server groups tools into categories, use `tool_tags` to limit what a given connection discovers:
+
+```yaml
+mcps:
+  crm_read_only:
+    url: "https://crm.acme.com/mcp"
+    tool_tags: ["read-only"]     # orders_agent only sees read tools
+
+  crm_admin:
+    url: "https://crm.acme.com/mcp"
+    tool_tags: ["admin"]         # admin_agent sees write tools
+```
+
+By default, tags are sent as an `X-MCP-Tool-Tag` header. If your server expects something else, set `tool_tag_transport` to one of two types:
+
+| `type` | Where the tag goes | Required field |
+|--------|--------------------|-----------------|
+| `header` | A custom request header, instead of `X-MCP-Tool-Tag` | `header_name` — the header to use |
+| `query_param` | A query string parameter appended to the MCP `url` | `param_name` — the parameter name |
+
+<CodeGroup>
+```yaml Custom header
+mcps:
+  internal_api:
+    url: "https://internal.acme.com/mcp"
+    tool_tags: ["v2"]
+    tool_tag_transport:
+      type: header
+      header_name: "X-Internal-Tag"
+    # sends: X-Internal-Tag: v2
+```
+
+```yaml Query parameter
+mcps:
+  legacy_api:
+    url: "https://legacy.acme.com/mcp"
+    tool_tags: ["v2"]
+    tool_tag_transport:
+      type: query_param
+      param_name: "tag"
+    # requests: https://legacy.acme.com/mcp?tag=v2
+```
+</CodeGroup>
+
+---
+
+## `resolvers`
+
+A resolver fills a `{{variable}}` in a prompt — always run *before* the agent starts, never chosen by the model, and free (no token cost).
+
+```yaml
+resolvers:
+  current_date:
+    scope: shared      # runs once, every agent that opts in gets it
+
+  customer_name:
+    scope: shared
+
+  loyalty_tier:
+    scope: agent        # runs only for agents that declare it
+```
+
+| `scope` | Runs on | Use it for |
+|---------|---------|------------|
+| `shared` | Every agent that lists it | Context most agents need — date, user identity, locale |
+| `agent` | Only the declaring agent | Context specific to one agent — its own lookups, its own logic |
+
+Implementation, scaffolded by `generate`:
+
+```python plugins/resolvers/shared.py
+class SharedResolver:
+    def current_date(self, ctx) -> str:
+        return datetime.now().strftime("%Y-%m-%d")
+
+    def customer_name(self, ctx) -> str:
+        return ctx.headers.get("X-Customer-Name", "Customer")
+```
+
+### Resolvers vs. tools
+
+Both point at Python code — the difference is *when* they run and *who* decides to run them.
+
+| | Resolver | Tool |
+|---|---|---|
+| Runs | Before the agent starts | While the agent is running |
+| Chosen by | Extra, automatically | The model, if it decides to |
+| Visible to the model | No | Yes (name + description) |
+| Token cost | None | Yes |
+| Typical use | Fill `{{current_date}}`, `{{customer_name}}` | "Look up this order", "cancel this booking" |
 
 ---
 
 ## `orchestrators`
 
-Orchestrators are **routers**. They read the user's message, look at their children's descriptions, and decide which child to invoke. They do not call tools or MCP servers directly — their children are their capabilities.
+An orchestrator is a **router**. It reads the incoming message, looks at its children's `description` fields, and decides which child should handle it. It never calls tools or MCP servers itself — routing is its only job.
 
 ```yaml
 orchestrators:
@@ -120,7 +263,7 @@ orchestrators:
     description: "Routes customer requests to the right department."
     model:
       provider: anthropic
-      name: claude-haiku-4-5    # routing only — fast model is fine
+      name: claude-haiku-4-5    # routing only — a fast model is enough
       temperature: 0.0
     prompts:
       orchestrator: "prompts/router/orchestrator.md"
@@ -129,28 +272,30 @@ orchestrators:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | no | Display name. Defaults to the key. |
-| `description` | no | Used by parent orchestrators to decide when to route here. |
-| `model` | no | Overrides `defaults.model`. Full replacement — specify all fields. |
-| `prompts.orchestrator` | **yes** | Instructions for how to route among children. |
-| `prompts.system` | no | Additional system context. |
-| `prompts.user` | no | User-turn context injection. |
+| `name` | No | Display name. Defaults to the key. |
+| `description` | No | What a *parent* orchestrator reads to decide when to route here. |
+| `model` | No | Overrides `defaults.model`. Full replacement. |
+| `prompts.orchestrator` | **Yes** | The routing instructions — see below. |
+| `prompts.system` | No | Additional system context. |
+| `prompts.user` | No | User-turn context injection. |
 
-### The orchestrator prompt
+### Writing the orchestrator prompt
 
-The `orchestrator` prompt is what tells the LLM how to choose among its children. It sees the children's `description` fields. Example `prompts/router/orchestrator.md`:
+`prompts.orchestrator` points to a Markdown file containing the actual instructions the router follows. This is the file's full content — nothing more is needed:
 
-```markdown
+```markdown prompts/router/orchestrator.md
 You are a customer support router for an online store.
 Route the user to the most relevant department based on their message.
-If unclear, ask one clarifying question before routing.
+If it's unclear which department applies, ask one clarifying question before routing.
 ```
+
+The router sees this prompt plus every child's `description`. It picks the best match — it doesn't need to know how each child works internally.
 
 ---
 
 ## `agents`
 
-Agents are **executors**. They receive the user's message (after routing), run an LLM with their prompt, and may call tools or MCP servers to fulfill the request.
+An agent is an **executor**. Once the router sends it a request, it runs an LLM with its own prompt and can call whatever tools or MCP servers it's been given access to — declared above under [`tools`](#tools), [`mcps`](#mcps), and [`resolvers`](#resolvers).
 
 ```yaml
 agents:
@@ -185,21 +330,21 @@ agents:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | no | Display name. |
-| `description` | **yes (if has a parent orchestrator)** | How the orchestrator knows when to route here. |
-| `model` | no | Overrides `defaults.model`. |
-| `prompts.system` | no | System prompt file. |
-| `prompts.user` | no | User-turn context injection. |
-| `resolvers` | no | List of resolver ids to run before this agent. |
-| `tools` | no | List of tool ids this agent can call. |
-| `mcps` | no | List of MCP server ids this agent has access to. |
-| `protected` | no | `true` to enable access control for this node. See [Access Control](#access-control). |
+| `name` | No | Display name. |
+| `description` | Required if this agent sits under an orchestrator | Tells the router when to send requests here. |
+| `model` | No | Overrides `defaults.model`. Full replacement. |
+| `prompts.system` | No | Defines the agent's behavior and persona. |
+| `prompts.user` | No | User-turn context injection. |
+| `resolvers` | No | Resolver ids to run before this agent executes. |
+| `tools` | No | Tool ids this agent is allowed to call. |
+| `mcps` | No | MCP server ids this agent has access to. |
+| `protected` | No | `true` to gate this node behind [access control](#access-control). |
 
-### The system prompt
+An agent only ever sees the tools, MCP servers, and resolvers it explicitly lists — nothing is shared by default.
 
-The `system` prompt defines the agent's behavior and constraints. Example `prompts/orders/system.md`:
+### Writing the system prompt
 
-```markdown
+```markdown prompts/orders/system.md
 You are an orders specialist for Acme Store.
 Today's date is {{current_date}}.
 You are helping {{customer_name}}.
@@ -212,154 +357,57 @@ You can:
 You cannot process refunds — direct those questions to the returns team.
 ```
 
-Variables like `{{current_date}}` are filled by resolvers before the agent runs.
-
----
-
-## `tools`
-
-Tools are Python functions exposed to the LLM. The agent decides at runtime whether to call them based on the conversation.
-
-```yaml
-tools:
-  get_order_status:
-    description: "Get the current status and tracking info for an order by order ID."
-
-  cancel_order:
-    description: "Cancel an order that hasn't shipped. Requires order ID and reason."
-
-  create_return_request:
-    description: "Open a return request for a delivered order. Requires order ID and reason."
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `description` | yes | What the LLM sees when deciding whether to call this tool. Write it clearly — it directly affects tool selection. |
-
-The actual implementation lives in `plugins/tools/<tool_name>.py`, generated by `agentctl generate`. You fill in the business logic.
-
-<Tip>
-  Write tool descriptions as if explaining to a smart assistant. "Get order status by order ID" is better than "order_status_getter". The description is the LLM's only signal.
-</Tip>
-
----
-
-## `mcps`
-
-MCP servers expose remote tools discovered at build time. The engine creates one client per server and binds its tools to agents that declare it.
-
-```yaml
-mcps:
-  orders_mcp:
-    url: "https://api.acme.com/mcp"
-
-  catalog_mcp:
-    url: "https://catalog.acme.com/mcp"
-    tool_tags: ["public"]        # only discover tools tagged "public"
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `url` | yes | Streamable HTTP MCP endpoint. |
-| `tool_tags` | no | Only discover tools with this tag. Sent as `X-MCP-Tool-Tag` header. |
-| `tool_tag_transport` | no | Override how tags are sent. See below. |
-
-### Tool tags
-
-If your MCP server groups its tools by tag, you can limit which tools each agent sees:
-
-```yaml
-mcps:
-  crm_mcp:
-    url: "https://crm.acme.com/mcp"
-    tool_tags: ["read-only"]     # orders_agent only gets read tools
-
-  crm_mcp_admin:
-    url: "https://crm.acme.com/mcp"
-    tool_tags: ["admin"]         # admin_agent gets write tools
-```
-
-For servers that use a query param instead of a header:
-
-```yaml
-mcps:
-  legacy_api:
-    url: "https://legacy.acme.com/mcp"
-    tool_tags: ["v2"]
-    tool_tag_transport:
-      type: query_param
-      param_name: "tag"
-```
-
----
-
-## `resolvers`
-
-Resolvers fill `{{variables}}` in prompt files **before** the agent runs. They are deterministic — the LLM never sees them, never chooses them, and they cost no tokens.
-
-```yaml
-resolvers:
-  current_date:
-    scope: shared      # generated once, available to all agents
-
-  customer_name:
-    scope: shared
-
-  loyalty_tier:
-    scope: agent       # generated per-agent, only for agents that declare it
-```
-
-| `scope` | Description |
-|---------|-------------|
-| `shared` | Runs once on `SharedResolver`. All agents inherit it. Use for things like current date, user identity. |
-| `agent` | Runs only for the agents that declare it. Use for agent-specific context. |
-
-Implementation is generated by `agentctl generate` into `plugins/resolvers/`. Example:
-
-```python
-class SharedResolver:
-    def current_date(self, ctx) -> str:
-        return datetime.now().strftime("%Y-%m-%d")
-
-    def customer_name(self, ctx) -> str:
-        return ctx.headers.get("X-Customer-Name", "Customer")
-```
-
-### Resolvers vs. tools
-
-Both point at Python code, but they're different:
-
-| | Resolver | Tool |
-|---|---|---|
-| When it runs | Before the LLM | During LLM execution |
-| Chosen by | Engine (always) | LLM (when it decides to) |
-| Visible to LLM | No | Yes (name + description) |
-| Token cost | None | Yes |
-| Purpose | Fill prompt variables | Perform actions |
+`{{current_date}}` and `{{customer_name}}` are filled in automatically before the agent runs — see [resolvers](#resolvers) above.
 
 ---
 
 ## `hooks`
 
-Hooks are trusted lifecycle code — auth, policy, audit — that run automatically and are **never exposed to the LLM**.
+A hook is trusted code that runs automatically at a fixed point in the request lifecycle — never exposed to the model, never chosen by it. The most common use is injecting auth headers before an MCP call:
 
 ```yaml
 hooks:
   before_mcp_request:
     - plugin: mcp_auth
-      method: before_mcp_request
+      method: inject_auth
 ```
 
-The most common hook is `before_mcp_request`: it injects `Authorization` headers before each MCP call, so private MCP servers work without putting tokens in prompts or logs.
-Authentication logic belongs in the hook/plugin code, where it can read one or more environment variables or secret-manager values and construct the required headers.
+The YAML only registers *which* hook runs *where* — `plugin` resolves to a class through `plugins/plugins.toml`, and `method` names the method to call. It carries no import path, no config block, and no secret. The hook code reads its token from the environment and attaches the `Authorization` header at request time, so the token never touches a prompt, a log line, or the YAML file itself.
 
-See [Runtime Hooks](/docs/runtime-hooks) for all 10 lifecycle points and examples.
+Full list of lifecycle points, audit hooks, and result-transform examples: [Runtime Hooks](/docs/runtime-hooks).
+
+---
+
+## `plugins`
+
+Tells Extra where to find your plugin code, so imports work regardless of which directory you run commands from.
+
+```yaml
+plugins:
+  import_roots: ["."]
+```
+
+Set this once, at the project root, and forget about it.
 
 ---
 
 ## `graph`
 
-The graph declares runtime topology. Indentation = parent/child relationship. The single top-level key is the root — the first node every request hits.
+`graph` is where routing topology is declared. Indentation defines parent/child relationships. There is exactly one root — the entry point every request hits first.
+
+Here's the running example we've been building — one orchestrator routing to three agents:
+
+```text
+User message
+     │
+     ▼
+  router                  orchestrator — decides where to send the request
+  ├── orders_agent        handles order status, tracking
+  ├── returns_agent       handles refunds and returns
+  └── catalog_agent       handles product questions
+```
+
+The YAML is a direct translation of that tree:
 
 ```yaml
 graph:
@@ -369,43 +417,32 @@ graph:
     catalog_agent:
 ```
 
-More complex example — nested orchestrators:
+Orchestrators can nest inside other orchestrators, letting you build multi-level routing:
 
 ```yaml
 graph:
   main_router:
-    store_router:          # sub-orchestrator for store questions
+    store_router:          # sub-orchestrator — only sees store-related children
       orders_agent:
       returns_agent:
       catalog_agent:
-    account_agent:         # direct agent for account management
-    vip_agent:             # protected — only accessible to VIP customers
+    account_agent:          # direct child of main_router
+    vip_agent:               # protected — only reachable by VIP customers
 ```
 
-Rules:
+At runtime, `main_router` first decides between `store_router`, `account_agent`, and `vip_agent`. If it picks `store_router`, that orchestrator then makes its own routing decision among its three children. Each orchestrator only ever sees its own direct children — never the whole tree.
+
+**Rules:**
 - Exactly one root.
-- Every key must be declared in `orchestrators` or `agents`.
-- Orchestrators can have children; agents are normally leaves.
+- Every key must already be declared under `orchestrators` or `agents`.
+- Orchestrators can have children; agents are leaves.
 - No cycles.
 
 ---
 
-## `plugins`
+## Access control {#access-control}
 
-Controls how the engine finds your plugin code when running from different directories.
-
-```yaml
-plugins:
-  import_roots: ["."]    # make the project root importable
-```
-
-This lets you use package-style references in hooks (`company.plugins.auth:AuthHook`) without worrying about the working directory. Resolved relative to the spec file.
-
----
-
-## Access control
-
-Mark any node `protected: true` to gate it behind your access plugin:
+Mark any node `protected: true` to gate it behind your own access logic. A protected node is invisible to the router until your access plugin approves it — the model never even knows it exists.
 
 ```yaml
 agents:
@@ -416,22 +453,21 @@ agents:
       system: "prompts/vip/system.md"
 ```
 
-When any node is `protected: true`, the engine expects `plugins/access.py`:
+When any node in the spec is `protected: true`, Extra requires `plugins/access.py`:
 
-```python
+```python plugins/access.py
 class AccessResolver:
     def can_access(self, ctx, node_id: str) -> bool:
-        # ctx has request headers and metadata
         return ctx.headers.get("X-Customer-Tier") == "vip"
 ```
 
-Protected nodes that fail the check are hidden from the router entirely — the LLM never sees them.
+`ctx` carries the request headers — use whatever your auth system already provides. A denied node is removed from the router's options entirely.
 
 ---
 
 ## Complete example
 
-An e-commerce support bot with two tiers of customers:
+An e-commerce support bot with a protected VIP tier:
 
 ```yaml
 system:
@@ -503,7 +539,7 @@ agents:
 hooks:
   before_mcp_request:
     - plugin: mcp_auth
-      method: before_mcp_request
+      method: inject_auth
 
 plugins:
   import_roots: ["."]

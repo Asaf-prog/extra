@@ -1,0 +1,402 @@
+---
+title: Full Example — Zero to Hero
+description: Build a real support system from an empty file, one YAML section at a time.
+---
+
+## What we're building
+
+An online store — Acme Store — needs a support assistant. Three obvious jobs, three separate agents: someone to check order status, someone to handle returns, someone to answer product questions. A real support team would never ask one person to do all three well — the order desk doesn't know the return policy by heart, and the product expert doesn't have access to shipment tracking. An AI agent is no different: give it too much to know at once, and it starts guessing at the parts it's weakest on. So each job gets its own agent, with only the tools and data that job actually needs.
+
+We'll also add one members-only agent, visible only to verified VIP customers.
+
+```text
+                     main_router
+                    /            \
+             store_router        vip_agent
+            /      |      \      (protected)
+    orders_agent returns_agent catalog_agent
+    (local tool)  (prompt only)  (MCP)
+```
+
+We'll build this YAML section by section, explaining why each piece is there, then generate, implement, and run it for real.
+
+---
+
+## Step 1 — Create a project folder
+
+```bash
+mkdir acme-store
+cd acme-store
+```
+
+Everything from here — the spec, the prompt files, the generated plugin code — lives inside this one folder.
+
+Start the spec file with just the one thing every spec requires:
+
+```yaml agents.yml
+system:
+  name: "Acme Store Support"
+```
+
+That's already a valid, if useless, spec. Everything below adds to this same file, one block at a time.
+
+---
+
+## Step 2 — Set a default model
+
+```yaml agents.yml
+system:
+  name: "Acme Store Support"
+
+defaults:
+  model:
+    provider: anthropic
+    name: claude-haiku-4-5
+    temperature: 0.0
+```
+
+Most of this system is routing and factual lookups, not creative writing — a fast, cheap, deterministic model is the right default everywhere until an agent proves it needs more.
+
+---
+
+## Step 3 — Declare the tool orders needs
+
+```yaml agents.yml
+tools:
+  get_order_status:
+    description: "Get the current status and tracking info for an order by order ID."
+```
+
+We declare this before any agent, because an agent is about to reference it by id — Extra needs `get_order_status` to already exist in this list, or the reference fails validation. Tools and MCP servers get declared first; the agents that use them come later.
+
+---
+
+## Step 4 — Declare the MCP server catalog needs
+
+```yaml agents.yml
+mcps:
+  catalog_mcp:
+    url: "https://mcp.acmestore.internal/catalog"
+```
+
+<Note>
+  This URL is illustrative — it points at Acme's own internal catalog server, which doesn't exist outside this example. In your real deployment, this is where your actual product catalog or inventory system's MCP endpoint goes. The point of this step is that connecting one is exactly this simple: a name and a URL, no client code.
+</Note>
+
+---
+
+## Step 5 — Build the orchestrators
+
+We have three worker agents to build (Step 6) plus one VIP agent — but before any of them exist, something needs to decide which one a message goes to. That's what an orchestrator is: not a worker, just a router. It reads the message, reads each option's `description`, and picks one.
+
+Looking at our tree from the top: `main_router` has to choose between two things — "regular store support" or "the VIP desk". It does **not** need to know that `orders_agent`, `returns_agent`, or `catalog_agent` exist individually — those are one level down, someone else's problem. That's why `store_router` exists: it's the one that actually chooses between orders, returns, and catalog. Splitting it this way keeps every single routing decision small — nobody ever has to pick from four or five options at once.
+
+So we declare both, top to bottom, matching the tree:
+
+```yaml agents.yml
+orchestrators:
+  main_router:
+    description: "Routes to store support, or to the VIP desk for verified members."
+    prompts:
+      orchestrator: "prompts/main_router/orchestrator.md"
+
+  store_router:
+    description: "Routes order status and return questions."
+    prompts:
+      orchestrator: "prompts/store_router/orchestrator.md"
+```
+
+Two orchestrators, two narrow decisions. Neither one is doing the store's actual work yet — that's what the agents in the next step are for.
+
+---
+
+## Step 6 — Add the agents
+
+```yaml agents.yml
+agents:
+  orders_agent:
+    description: "Handles order status and tracking questions."
+    prompts:
+      system: "prompts/orders/system.md"
+    tools: [get_order_status]
+
+  returns_agent:
+    description: "Explains the return policy and how to start a return."
+    prompts:
+      system: "prompts/returns/system.md"
+
+  catalog_agent:
+    description: "Answers product questions using the live catalog."
+    prompts:
+      system: "prompts/catalog/system.md"
+    mcps: [catalog_mcp]
+
+  vip_agent:
+    description: "Exclusive support line for verified VIP members."
+    prompts:
+      system: "prompts/vip/system.md"
+    protected: true
+```
+
+Each agent gets exactly what its job needs, nothing more:
+
+- `orders_agent` gets one tool — real order data, looked up, not guessed.
+- `returns_agent` gets **no tool at all**. The return policy is fixed text, not something to look up per request, so a tool would just be unused ceremony — the prompt alone is the right amount of machinery here.
+- `catalog_agent` gets one MCP server — live product data, and nothing else.
+- `vip_agent` is `protected: true` — more on that in [Step 8](#step-8-fill-in-vip-access-control).
+
+None of these agents can reach outside their own lane. `orders_agent` has no path to the catalog; `catalog_agent` has no path to order data. That separation — not prompt wording — is what keeps each one from guessing at a job it wasn't given.
+
+The full YAML is done. Nothing else gets added to `agents.yml` from here — the rest is generating and writing the code and prompts it points to.
+
+---
+
+## Step 7 — Generate the plugin stubs
+
+Before writing a single prompt file or line of Python, run `generate`. It reads the YAML and scaffolds everything it references, so you know exactly what's left to fill in.
+
+```bash
+docker run --rm \
+  -v $(pwd):/workspace \
+  -w /workspace \
+  ghcr.io/asaf-prog/extra:latest \
+  generate --config agents.yml
+```
+
+Go into the folder it created — here's exactly what's inside and why each piece exists:
+
+```text
+plugins/
+  __init__.py
+  plugins.toml
+  tools/
+    __init__.py
+    get_order_status.py
+  access.py
+```
+
+<AccordionGroup>
+  <Accordion title="plugins/__init__.py and plugins/tools/__init__.py — empty package markers">
+    These make `plugins` and `plugins/tools` proper Python packages so the engine can import your code. You never need to open or edit them.
+  </Accordion>
+
+  <Accordion title="plugins/plugins.toml — the manifest">
+    Maps `get_order_status` to `plugins/tools/get_order_status.py`. `generate` writes and updates this automatically every time you run it — **never edit it by hand.**
+  </Accordion>
+
+  <Accordion title="plugins/tools/get_order_status.py — your tool, unimplemented">
+    ```python plugins/tools/get_order_status.py
+    def get_order_status(input: dict) -> str:
+        """Get the current status and tracking info for an order by order ID."""
+        raise NotImplementedError
+    ```
+
+    `input` is a dict of whatever arguments the model passes when it calls this tool, and the return value is a plain string the model reads back. `raise NotImplementedError` is a deliberate placeholder, not a bug — it doesn't stop `generate` or `validate` from succeeding. If the model calls this before you replace the body, you get a loud, clear failure instead of silent wrong behavior. Step 10 replaces this with real code.
+  </Accordion>
+
+  <Accordion title="plugins/access.py — generated because vip_agent is protected">
+    ```python plugins/access.py
+    class AccessResolver:
+        def can_access(self, ctx: dict, node_id: str) -> bool:
+            raise NotImplementedError
+    ```
+
+    `generate` scaffolds this automatically the moment any node in your spec has `protected: true` — you didn't have to ask for it separately. Right now it blocks *every* protected node, since it always raises. Step 8 fills in the real check.
+  </Accordion>
+</AccordionGroup>
+
+`catalog_agent` and `returns_agent` have no files here at all — `catalog_agent`'s capability comes from an MCP server, which needs no local code, and `returns_agent` has no tool to generate a stub for.
+
+---
+
+## Step 8 — Fill in VIP access control {#step-8-fill-in-vip-access-control}
+
+Replace the generated `plugins/access.py` stub with a real check:
+
+```python plugins/access.py
+class AccessResolver:
+    def can_access(self, ctx: dict, node_id: str) -> bool:
+        if node_id == "vip_agent":
+            return ctx.headers.get("X-Customer-Tier") == "vip"
+        return True
+```
+
+Until a request carries that header, `vip_agent` is invisible to `main_router` entirely — not refused after the fact, just never offered as an option. That's a stronger guarantee than anything you could write into a prompt.
+
+---
+
+## Step 9 — Write the prompt files
+
+The YAML from Step 6 references five prompt files that still don't exist on disk. `generate` only scaffolds plugin *code* — it never writes prompt files for you, and `validate` fails if a referenced one is missing. So we write them now, before validating anything.
+
+```markdown prompts/main_router/orchestrator.md
+You are the top-level router for Acme Store Support.
+Route order status and return questions to store_router.
+Route anything from a verified VIP member to vip_agent.
+```
+
+```markdown prompts/store_router/orchestrator.md
+You route between order status and returns.
+Route tracking and delivery questions to orders_agent.
+Route return and refund questions to returns_agent.
+```
+
+```markdown prompts/orders/system.md
+You are an order status specialist for Acme Store.
+Use the get_order_status tool to check real order data before answering.
+Never guess a status or delivery date — always look it up.
+```
+
+```markdown prompts/returns/system.md
+You are a returns specialist for Acme Store.
+Standard policy: returns are accepted within 30 days of delivery, in original condition, for a full refund.
+Explain the policy clearly and tell the customer how to start a return.
+```
+
+```markdown prompts/catalog/system.md
+You are a product specialist for Acme Store.
+Answer using the catalog search tool. If it doesn't have an answer, say so instead of guessing.
+```
+
+```markdown prompts/vip/system.md
+You are the VIP support specialist for Acme Store.
+You only assist customers whose VIP status has already been verified.
+```
+
+Notice `orders_agent` and `catalog_agent` are both told to defer to their tool's real data rather than reason their way to an answer — and that instruction only works because each one has nothing else available to reach for.
+
+---
+
+## Step 10 — Implement the tool
+
+Real stores don't expose their order database as a public API, so we simulate one with an in-memory lookup — in production, swap this for your real database or order-service call. Remember the actual signature from Step 7: one `input` dict in, a string back out.
+
+```python plugins/tools/get_order_status.py
+_ORDERS = {
+    "ord-1001": {"status": "delivered", "tracking": None},
+    "ord-1002": {"status": "shipped", "tracking": "1Z999AA10123456784"},
+}
+
+def get_order_status(input: dict) -> str:
+    """Get the current status and tracking info for an order by order ID."""
+    order_id = input["order_id"]
+    order = _ORDERS.get(order_id)
+    if order is None:
+        return f"No order found with ID '{order_id}'."
+    if order["tracking"]:
+        return f"Order {order_id} is {order['status']}. Tracking: {order['tracking']}."
+    return f"Order {order_id} is {order['status']}."
+```
+
+No new dependency needed here — this uses nothing beyond the standard library. If yours does (an HTTP client, a database driver), that goes in `requirements.txt` at the project root — a plain pip file, not TOML, and a different mechanism entirely from `plugins.toml`.
+
+---
+
+## Step 11 — Validate
+
+```bash
+docker run --rm \
+  -v $(pwd):/workspace \
+  -w /workspace \
+  ghcr.io/asaf-prog/extra:latest \
+  validate agents.yml
+```
+
+Fully offline. It checks the YAML shape, that every tool/MCP id an agent references is actually declared, that all five prompt files exist on disk, and that `plugins/access.py` is importable since a protected node exists. Exits non-zero with a specific error location if anything's wrong.
+
+---
+
+## Step 12 — Run it
+
+Rather than passing `-e ANTHROPIC_API_KEY=sk-...` on every command, put it in a `.env` file once:
+
+```text .env
+ANTHROPIC_API_KEY=sk-...
+```
+
+Then reference it with `--env-file` instead of `-e`:
+
+```bash
+docker run --rm \
+  -v $(pwd):/workspace \
+  -w /workspace \
+  --env-file .env \
+  ghcr.io/asaf-prog/extra:latest \
+  run --config agents.yml --message "What's the status of order ord-1002?"
+```
+
+The path: `main_router` → `store_router` → `orders_agent` → `get_order_status` → a real, looked-up answer: shipped, tracking `1Z999AA10123456784`.
+
+```bash
+docker run --rm \
+  -v $(pwd):/workspace \
+  -w /workspace \
+  --env-file .env \
+  ghcr.io/asaf-prog/extra:latest \
+  run --config agents.yml --message "What's your return policy?"
+```
+
+This one routes to `returns_agent` — no tool call, just the prompt's own policy text, answered instantly.
+
+```bash
+docker run --rm \
+  -v $(pwd):/workspace \
+  -w /workspace \
+  --env-file .env \
+  ghcr.io/asaf-prog/extra:latest \
+  run --config agents.yml --message "Do you have this jacket in size medium?"
+```
+
+This one routes to `catalog_agent`. Since `catalog_mcp` points at an illustrative URL that doesn't really exist, the engine logs a warning and connects with no tools bound — it'll answer from the prompt alone, without a real catalog lookup. Point `catalog_mcp`'s `url` at your real internal server and this same call starts returning real inventory data, with no other change to the spec.
+
+---
+
+## Step 13 — Run it as a server
+
+`run` above executes one message and exits — good for testing, but not something else can talk to. `serve` starts the same spec as a long-lived HTTP API instead:
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -v $(pwd):/workspace \
+  -w /workspace \
+  --env-file .env \
+  ghcr.io/asaf-prog/extra:latest \
+  serve --config agents.yml
+```
+
+Now call it over HTTP instead of the CLI:
+
+```bash
+curl -X POST http://localhost:8080/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "What'\''s the status of order ord-1002?"}]}'
+```
+
+Same spec, same routing, same agents — just reachable over the network instead of one process per message. It's stateless: each call sends the full conversation and gets one response back, no session or history is kept between requests. For that, see the widget step below, which runs a different mode (`agent-manager`) on top of the same YAML.
+
+---
+
+## What you just built
+
+- A two-level routing hierarchy where every orchestrator's decision stays narrow
+- Four agents with completely separate tool/MCP access — the real mechanism behind not guessing outside your lane
+- One protected node, gated by a real access plugin instead of prompt wording
+- A working local tool, an MCP declaration ready for a real server, and an agent that needed no tool at all
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Add the chat widget" icon="message-bot" href="/docs/quickstart#with-conversation-history-and-widget">
+    Turn this into a live chat you can embed on a website.
+  </Card>
+  <Card title="MCP auth" icon="shield" href="/docs/runtime-hooks#mcp-auth">
+    Add real credentials to catalog_mcp with a hook.
+  </Card>
+  <Card title="Full YAML reference" icon="file-code" href="/docs/yaml-spec">
+    Every field you can declare, explained in depth.
+  </Card>
+  <Card title="Execution limits" icon="gauge" href="/docs/execution-limits">
+    Cap tool calls and loops before they run away.
+  </Card>
+</CardGroup>
