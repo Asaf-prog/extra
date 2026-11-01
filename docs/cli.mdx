@@ -30,6 +30,8 @@ agentctl validate agents.yml
 
 Checks schema, all references (tools, resolvers, MCPs), prompt file paths, graph structure, and imports any declared hooks to verify they load. Exits non-zero on any error.
 
+It also warns (without failing) about tool parameters that have no description for the LLM. Describe a parameter with `Annotated`; see [Implementing a tool](/docs/mcp-and-tools#implementing-a-tool).
+
 ---
 
 ### `inspect`

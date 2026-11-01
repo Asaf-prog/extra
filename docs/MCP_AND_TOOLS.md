@@ -132,6 +132,24 @@ def book_flight() -> str:
     raise NotImplementedError
 ```
 
+Describe each parameter with `Annotated` so the LLM knows what value to pass.
+The description is included in the tool's input schema:
+
+```python
+from typing import Annotated
+
+
+def book_flight(
+    origin: Annotated[str, "IATA code of the departure airport, e.g. TLV"],
+    destination: Annotated[str, "IATA code of the arrival airport"],
+    date: Annotated[str, "Travel date as YYYY-MM-DD"],
+) -> str:
+    ...
+```
+
+`agentctl validate` warns about any tool parameter without a description (or
+with a blank one). It does not fail validation yet.
+
 Run `agentctl generate` to create tool stubs. The engine loads each tool once at
 graph-build time and wraps it as a LangChain `StructuredTool`. At runtime, only
 the agent's declared tools are bound to its LLM, and a tool-call loop runs until

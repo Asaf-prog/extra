@@ -149,7 +149,21 @@ def get_order_status(order_id: str) -> dict:
     }
 ```
 
-The docstring becomes the tool description the LLM sees. The engine wraps the function automatically.
+The engine wraps the function automatically. The tool description the LLM sees comes from the YAML `description`; the docstring is for developers and is not sent to the model.
+
+Describe each parameter with `Annotated` so the LLM knows what value to pass. The description is included in the tool's input schema:
+
+```python
+from typing import Annotated
+
+
+def get_order_status(
+    order_id: Annotated[str, "The order ID from the confirmation email, e.g. ORD-1042"],
+) -> dict:
+    ...
+```
+
+`agentctl validate` warns about any tool parameter without a description, or with a blank one. It does not fail validation yet.
 
 <Tip>
   Write clear descriptions and typed parameters. The LLM reads both when deciding how to call a tool. Vague descriptions lead to wrong or missed tool calls.
