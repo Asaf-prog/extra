@@ -17,6 +17,10 @@ Detection is purely static, like ``plugin_stubs``: tool files are parsed
 (``ast``), never executed. Anything the scan cannot positively identify — a
 missing or unparseable file, a function it cannot find — is skipped and left
 to the existing plugin checks and runtime loaders to report.
+
+Parameters LangChain fills in at runtime are left out of the schema sent to the
+model, so they are not checked. Being static, the scan recognizes them by the
+names they are written with (see ``_is_runtime_injected``).
 """
 
 from __future__ import annotations
@@ -63,12 +67,62 @@ def _check_tool(path: Path, tool_id: str) -> list[str]:
         return []
     warnings: list[str] = []
     for arg in (*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs):
+        if _is_runtime_injected(arg):
+            continue
         description = _annotated_description(arg.annotation)
         if description is None:
             warnings.append(f'tool "{tool_id}": parameter "{arg.arg}" is missing a description')
         elif not description.strip():
             warnings.append(f'tool "{tool_id}": parameter "{arg.arg}" has an empty description')
     return warnings
+
+
+# LangChain drops these parameter names from every tool schema (``FILTERED_ARGS``).
+_RUNTIME_ARG_NAMES = frozenset({"callbacks", "run_manager"})
+
+
+def _is_runtime_injected(arg: ast.arg) -> bool:
+    """True for a parameter LangChain fills in itself and never shows the model.
+
+    Mirrors ``langchain_core`` tool-schema filtering:
+
+    - ``callbacks`` / ``run_manager``, by name;
+    - ``config: RunnableConfig`` — only the bare type; ``RunnableConfig | None``
+      is still shown to the model;
+    - ``ToolRuntime`` or ``ToolRuntime[...]``;
+    - ``Annotated[T, Injected...]``: ``InjectedToolArg`` and its subclasses
+      (``InjectedToolCallId``, LangGraph's ``InjectedState`` / ``InjectedStore``),
+      bare or called.
+    """
+    if arg.arg in _RUNTIME_ARG_NAMES:
+        return True
+    annotation = arg.annotation
+    if annotation is None:
+        return False
+    if _type_name(annotation) in {"RunnableConfig", "ToolRuntime"}:
+        return True
+    if isinstance(annotation, ast.Subscript):
+        if _type_name(annotation.value) == "ToolRuntime":
+            return True
+        if _is_annotated(annotation.value) and isinstance(annotation.slice, ast.Tuple):
+            return any(_is_injected_marker(item) for item in annotation.slice.elts[1:])
+    return False
+
+
+def _is_injected_marker(node: ast.expr) -> bool:
+    """``InjectedState``, ``InjectedState("messages")``, ``tools.InjectedToolArg()``…"""
+    target = node.func if isinstance(node, ast.Call) else node
+    name = _type_name(target)
+    return name is not None and name.startswith("Injected")
+
+
+def _type_name(node: ast.expr) -> str | None:
+    """The bare name of ``X`` or ``module.X``; None for anything else."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
 
 
 def _annotated_description(annotation: ast.expr | None) -> str | None:

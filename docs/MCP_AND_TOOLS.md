@@ -149,6 +149,8 @@ def book_flight(
 
 `agentctl validate` warns about any tool parameter without a description (or
 with a blank one). It does not fail validation yet.
+Parameters LangChain fills in at runtime, such as `config: RunnableConfig` or
+`InjectedToolArg` annotations, are never sent to the model and are not checked.
 
 Run `agentctl generate` to create tool stubs. The engine loads each tool once at
 graph-build time and wraps it as a LangChain `StructuredTool`. At runtime, only
