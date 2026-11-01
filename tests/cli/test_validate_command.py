@@ -281,6 +281,59 @@ def test_cli_validate_exit_zero() -> None:
     assert "validation passed" in res.output
 
 
+def _spec_with_tool(tmp_path: Path, tool_source: str) -> str:
+    tools = tmp_path / "plugins" / "tools"
+    tools.mkdir(parents=True)
+    (tools / "lookup.py").write_text(tool_source, encoding="utf-8")
+    return _write(
+        tmp_path,
+        "system: {name: t}\ntools: {lookup: {description: Look things up.}}\n"
+        "agents: {a: {description: d, tools: [lookup]}}\ngraph: {a: }\n",
+    )
+
+
+def test_undescribed_tool_parameter_warns_but_passes(tmp_path: Path) -> None:
+    spec = _spec_with_tool(tmp_path, "def lookup(query: str) -> str:\n    return query\n")
+
+    result = validate_spec(spec)
+    res = CliRunner().invoke(cli, ["--log-level", "WARNING", "validate", spec])
+
+    assert result.ok, result.errors
+    assert result.warnings == ['tool "lookup": parameter "query" is missing a description']
+    assert res.exit_code == 0
+    assert 'warnings:\n  ! tool "lookup": parameter "query"' in res.output
+    assert "validation passed" in res.output
+
+
+def test_described_tool_parameter_has_no_warnings(tmp_path: Path) -> None:
+    spec = _spec_with_tool(
+        tmp_path,
+        "from typing import Annotated\n\n"
+        "def lookup(query: Annotated[str, 'What to look up.']) -> str:\n    return query\n",
+    )
+
+    result = validate_spec(spec)
+
+    assert result.ok, result.errors
+    assert result.warnings == []
+    assert "warnings:" not in CliRunner().invoke(cli, ["validate", spec]).output
+
+
+def test_warnings_are_shown_alongside_errors(tmp_path: Path) -> None:
+    spec = _spec_with_tool(tmp_path, "def lookup(query: str) -> str:\n    return query\n")
+    # Break the spec so validation fails for an unrelated reason.
+    Path(spec).write_text(
+        Path(spec).read_text(encoding="utf-8") + "plugins: {import_roots: [missing_dir]}\n",
+        encoding="utf-8",
+    )
+
+    res = CliRunner().invoke(cli, ["--log-level", "WARNING", "validate", spec])
+
+    assert res.exit_code != 0
+    assert "Validation failed" in res.output
+    assert 'parameter "query" is missing a description' in res.output
+
+
 def test_cli_validate_exit_nonzero_on_failure(tmp_path: Path) -> None:
     spec = _write(tmp_path, "system: {name: t}\n")  # missing graph -> invalid
     runner = CliRunner()

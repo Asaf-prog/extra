@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agent_engine.core.spec import AgentSpec, MCPSpec, OrchestratorSpec, SystemSpec
+from agent_engine.core.tool_metadata import scan_tool_param_descriptions
 from agent_engine.core.validator import SystemSpecValidator
 from agent_engine.engine.langgraph.graph.traversal import collect_mcp_specs, render_graph, walk
 from agent_engine.generate.manifest import hook_plugin_refs
@@ -53,6 +54,8 @@ def load_spec(path: str) -> tuple[SystemSpec, Path]:
 class ValidationResult:
     ok: bool
     errors: list[str] = field(default_factory=list)
+    # Reported but never fail validation (``ok`` depends on ``errors`` only).
+    warnings: list[str] = field(default_factory=list)
     import_roots: list[Path] = field(default_factory=list)
     agents: int = 0
     mcp_servers: int = 0
@@ -93,6 +96,9 @@ def validate_spec(path: str, *, register_roots: bool = True) -> ValidationResult
     # Local tool / resolver plugin files exist (file check only — no import).
     result.errors.extend(_check_plugin_files(spec, base_dir))
 
+    # Tool parameters the LLM gets no description for (static parse — no import).
+    result.warnings.extend(scan_tool_param_descriptions(spec, base_dir))
+
     # MCP url sanity (the parser already validates tool_tags/transport).
     mcps = collect_mcp_specs(spec.graph)
     for server_id, mcp in mcps.items():
@@ -132,6 +138,7 @@ def format_validation_report(result: ValidationResult) -> str:
     if not result.ok:
         lines = ["Validation failed:"]
         lines.extend(f"  ✗ {e}" for e in result.errors)
+        lines.extend(_format_warnings(result.warnings))
         return "\n".join(lines)
 
     lines = [
@@ -143,8 +150,15 @@ def format_validation_report(result: ValidationResult) -> str:
     ]
     for server_id, tags in result.tool_tags.items():
         lines.append(f"✓ tool_tags: {server_id} -> {','.join(tags)}")
+    lines.extend(_format_warnings(result.warnings))
     lines.append("✓ validation passed")
     return "\n".join(lines)
+
+
+def _format_warnings(warnings: list[str]) -> list[str]:
+    if not warnings:
+        return []
+    return ["warnings:", *(f"  ! {w}" for w in warnings)]
 
 
 # ---------------------------------------------------------------------------

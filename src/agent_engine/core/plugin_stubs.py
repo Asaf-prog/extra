@@ -194,15 +194,16 @@ def _stub_verdict(path: Path, function_name: str, class_name: str | None = None)
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (SyntaxError, UnicodeDecodeError, OSError):
         return _Verdict.IMPLEMENTED
-    fn = _find_function(tree, function_name, class_name)
+    fn = find_function(tree, function_name, class_name)
     if fn is None:
         return _Verdict.NO_FUNCTION
     return _Verdict.STUB if _is_stub_body(fn) else _Verdict.IMPLEMENTED
 
 
-def _find_function(
+def find_function(
     tree: ast.Module, name: str, class_name: str | None
 ) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """Find a top-level function, or a method of ``class_name``, by name."""
     body: list[ast.stmt] = tree.body
     if class_name is not None:
         cls = next(
