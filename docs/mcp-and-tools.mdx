@@ -163,7 +163,7 @@ def get_order_status(
     ...
 ```
 
-`agentctl validate` warns about any tool parameter without a description, or with a blank one. It does not fail validation yet.
+`agentctl validate` warns about any tool parameter without a description, or with a blank one. It does not fail validation yet. Parameters LangChain fills in at runtime, such as `config: RunnableConfig` or `InjectedToolArg` annotations, are never sent to the model and are not checked.
 
 <Tip>
   Write clear descriptions and typed parameters. The LLM reads both when deciding how to call a tool. Vague descriptions lead to wrong or missed tool calls.

@@ -319,6 +319,22 @@ def test_described_tool_parameter_has_no_warnings(tmp_path: Path) -> None:
     assert "warnings:" not in CliRunner().invoke(cli, ["validate", spec]).output
 
 
+def test_runtime_injected_parameter_is_not_reported(tmp_path: Path) -> None:
+    """LangChain fills ``config`` in at runtime; the model never sees it."""
+    spec = _spec_with_tool(
+        tmp_path,
+        "from typing import Annotated\n"
+        "from langchain_core.runnables import RunnableConfig\n\n"
+        "def lookup(query: Annotated[str, 'What to look up.'], config: RunnableConfig) -> str:\n"
+        "    return query\n",
+    )
+
+    result = validate_spec(spec)
+
+    assert result.ok, result.errors
+    assert result.warnings == []
+
+
 def test_warnings_are_shown_alongside_errors(tmp_path: Path) -> None:
     spec = _spec_with_tool(tmp_path, "def lookup(query: str) -> str:\n    return query\n")
     # Break the spec so validation fails for an unrelated reason.

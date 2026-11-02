@@ -171,6 +171,101 @@ def test_star_args_and_kwargs_are_ignored(tmp_path: Path) -> None:
     assert warnings == []
 
 
+# -- runtime-injected parameters: LangChain fills these in; the model never sees them --
+
+
+def test_runnable_config_parameter_is_not_reported(tmp_path: Path) -> None:
+    """The case from the #156 review: the model's schema only exposes ``query``."""
+    warnings = scan_one(
+        tmp_path,
+        """\
+        from typing import Annotated
+        from langchain_core.runnables import RunnableConfig
+
+        def get_customer(query: Annotated[str, "What to look up."], config: RunnableConfig) -> str:
+            return query
+        """,
+    )
+
+    assert warnings == []
+
+
+def test_optional_runnable_config_is_still_reported(tmp_path: Path) -> None:
+    """LangChain only hides a bare ``RunnableConfig``; an optional one reaches the model."""
+    warnings = scan_one(
+        tmp_path,
+        """\
+        from langchain_core.runnables import RunnableConfig
+
+        def get_customer(config: RunnableConfig | None = None) -> str:
+            return ""
+        """,
+    )
+
+    assert warnings == ['tool "get_customer": parameter "config" is missing a description']
+
+
+def test_callback_parameters_are_not_reported(tmp_path: Path) -> None:
+    warnings = scan_one(
+        tmp_path,
+        "def get_customer(callbacks=None, run_manager=None) -> str:\n    return ''\n",
+    )
+
+    assert warnings == []
+
+
+def test_tool_runtime_is_not_reported(tmp_path: Path) -> None:
+    warnings = scan_one(
+        tmp_path,
+        """\
+        from langchain.tools import ToolRuntime
+
+        def get_customer(runtime: ToolRuntime, other: ToolRuntime[dict, dict]) -> str:
+            return ""
+        """,
+    )
+
+    assert warnings == []
+
+
+def test_injected_annotations_are_not_reported(tmp_path: Path) -> None:
+    warnings = scan_one(
+        tmp_path,
+        """\
+        from typing import Annotated
+        from langchain_core import tools
+        from langchain_core.tools import InjectedToolArg, InjectedToolCallId
+        from langgraph.prebuilt import InjectedState, InjectedStore
+
+        def get_customer(
+            call_id: Annotated[str, InjectedToolCallId],
+            arg: Annotated[str, InjectedToolArg()],
+            qualified: Annotated[str, tools.InjectedToolArg],
+            state: Annotated[dict, InjectedState],
+            messages: Annotated[list, InjectedState("messages")],
+            store: Annotated[object, InjectedStore()],
+        ) -> str:
+            return ""
+        """,
+    )
+
+    assert warnings == []
+
+
+def test_injected_parameters_do_not_hide_undescribed_model_parameters(tmp_path: Path) -> None:
+    warnings = scan_one(
+        tmp_path,
+        """\
+        from langchain_core.runnables import RunnableConfig
+
+        def get_customer(query: str, config: RunnableConfig) -> str:
+            return query
+        """,
+    )
+
+    assert warnings == ['tool "get_customer": parameter "query" is missing a description']
+
+
 def test_async_tool_is_scanned(tmp_path: Path) -> None:
     warnings = scan_one(
         tmp_path,
